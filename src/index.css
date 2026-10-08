@@ -1,0 +1,184 @@
+@import "tailwindcss";
+
+@keyframes laserSweep {
+  0% {
+    top: 5%;
+    opacity: 0.8;
+  }
+  50% {
+    top: 92%;
+    opacity: 1;
+  }
+  100% {
+    top: 5%;
+    opacity: 0.8;
+  }
+}
+
+.animate-laser {
+  animation: laserSweep 2s ease-in-out infinite;
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.animate-fadeIn {
+  animation: fadeIn 0.15s ease-out forwards;
+}
+
+/* Print Optimization for all tabs, invoices, and thermal receipts */
+@media print {
+  @page {
+    size: A4 portrait;
+    margin: 8mm 10mm 12mm 10mm;
+  }
+
+  /* Reset layout constraints so printed documents span naturally */
+  html, body, #root, #root > div, main {
+    height: auto !important;
+    min-height: 0 !important;
+    max-height: none !important;
+    overflow: visible !important;
+    position: static !important;
+    background: white !important;
+    color: black !important;
+    width: 100% !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    box-shadow: none !important;
+  }
+
+  /* Completely hide app navigation, controls, headers and buttons */
+  aside, nav, header:not(.print-header), footer, .print\:hidden, button, .no-print, input, select, textarea {
+    display: none !important;
+  }
+  
+  /* Single sale print isolation */
+  body.printing-single-sale .hide-on-single-print {
+    display: none !important;
+  }
+
+  body.printing-single-sale #single-sale-print-template {
+    display: block !important;
+    visibility: visible !important;
+    width: 100% !important;
+    height: auto !important;
+    margin: 0 !important;
+    padding: 0 !important;
+  }
+
+  body:not(.printing-single-sale) #single-sale-print-template {
+    display: none !important;
+  }
+
+  /* Full statement / modal print unrolling */
+  div.fixed.inset-0 {
+    position: static !important;
+    display: block !important;
+    background: transparent !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    width: 100% !important;
+    height: auto !important;
+    max-height: none !important;
+    overflow: visible !important;
+  }
+
+  div.fixed.inset-0 > div {
+    box-shadow: none !important;
+    border: none !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    height: auto !important;
+    max-height: none !important;
+    position: static !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    overflow: visible !important;
+    display: block !important;
+    background: white !important;
+  }
+
+  .print-area {
+    display: block !important;
+    width: 100% !important;
+    background: white !important;
+    color: black !important;
+  }
+
+  /* Table and page-break optimization */
+  table {
+    width: 100% !important;
+    border-collapse: collapse !important;
+    page-break-inside: auto !important;
+    break-inside: auto !important;
+  }
+
+  tr {
+    page-break-inside: avoid !important;
+    break-inside: avoid !important;
+  }
+
+  thead {
+    display: table-header-group !important;
+  }
+
+  tfoot {
+    display: table-footer-group !important;
+  }
+
+  th, td {
+    border-bottom: 1px solid #cbd5e1 !important;
+    padding: 6px 8px !important;
+    text-align: left !important;
+    color: black !important;
+  }
+
+  /* Page break utilities */
+  .page-break, .print-page-break, .print-break-after {
+    page-break-after: always !important;
+    break-after: page !important;
+  }
+
+  .print-avoid-break, .print-break-inside-avoid {
+    page-break-inside: avoid !important;
+    break-inside: avoid !important;
+  }
+
+  .shadow-xs, .shadow-sm, .shadow-md, .shadow-lg, .shadow-xl, .shadow-2xl {
+    box-shadow: none !important;
+  }
+
+  .receipt-container {
+    width: 80mm !important;
+    margin: 0 auto !important;
+    padding: 10px !important;
+    font-family: monospace !important;
+  }
+
+  /* Force exact color printing */
+  * {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+}
+
+/* Prevent zooming on iOS focus and disable pinch zoom */
+@media screen and (max-width: 768px) {
+  input, select, textarea {
+    font-size: 16px !important;
+  }
+}
+
+html, body {
+  touch-action: manipulation;
+  overscroll-behavior-y: none;
+}

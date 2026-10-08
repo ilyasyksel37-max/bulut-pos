@@ -1,0 +1,10 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // PUBLIC ACCESS AS REQUESTED ("Şifreyi Kaldır")
+    // WARNING: This is insecure and only for initial setup/testing.
+    match /{document=**} {
+      allow read, write: if true;
+    }
+  }
+}

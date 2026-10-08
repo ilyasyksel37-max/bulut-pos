@@ -1,0 +1,129 @@
+{
+  "entities": {
+    "product": {
+      "title": "Product",
+      "description": "Stationery products in inventory",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string", "maxLength": 100 },
+        "barcode": { "type": "string", "maxLength": 50 },
+        "price": { "type": "number" },
+        "stock": { "type": "number" },
+        "minStock": { "type": "number" },
+        "category": { "type": "string", "maxLength": 50 },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["name", "barcode", "price", "stock", "minStock"]
+    },
+    "sale": {
+      "title": "Sale",
+      "description": "Sales transactions including cash, card and veresiye",
+      "type": "object",
+      "properties": {
+        "items": { "type": "array" },
+        "total": { "type": "number" },
+        "customerId": { "type": "string", "maxLength": 50 },
+        "customerName": { "type": "string", "maxLength": 100 },
+        "paymentMethod": { "type": "string", "enum": ["cash", "card", "veresiye"] },
+        "date": { "type": "string", "format": "date-time" },
+        "sellerId": { "type": "string", "maxLength": 50 }
+      },
+      "required": ["items", "total", "date", "paymentMethod"]
+    },
+    "expense": {
+      "title": "Expense",
+      "description": "Business expenses",
+      "type": "object",
+      "properties": {
+        "title": { "type": "string", "maxLength": 100 },
+        "amount": { "type": "number" },
+        "category": { "type": "string", "maxLength": 50 },
+        "date": { "type": "string", "format": "date-time" },
+        "description": { "type": "string", "maxLength": 500 }
+      },
+      "required": ["title", "amount", "date"]
+    },
+    "customer": {
+      "title": "Customer",
+      "description": "Customer profile with loyalty and veresiye ledger",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string", "maxLength": 100 },
+        "phone": { "type": "string", "maxLength": 20 },
+        "email": { "type": "string" },
+        "address": { "type": "string" },
+        "notes": { "type": "string" },
+        "debt": { "type": "number" },
+        "creditLimit": { "type": "number" },
+        "loyaltyPoints": { "type": "number" },
+        "totalSpent": { "type": "number" }
+      },
+      "required": ["name"]
+    },
+    "customer_transaction": {
+      "title": "Customer Transaction",
+      "description": "Customer ledger transaction (Veresiye sale or payment receipt)",
+      "type": "object",
+      "properties": {
+        "customerId": { "type": "string" },
+        "type": { "type": "string", "enum": ["DEBT", "PAYMENT"] },
+        "title": { "type": "string" },
+        "amount": { "type": "number" },
+        "paymentMethod": { "type": "string" },
+        "balanceAfter": { "type": "number" },
+        "date": { "type": "string", "format": "date-time" }
+      },
+      "required": ["customerId", "type", "amount", "date"]
+    },
+    "user": {
+      "title": "User",
+      "description": "System users and roles",
+      "type": "object",
+      "properties": {
+        "email": { "type": "string" },
+        "role": { "type": "string", "enum": ["admin", "staff"] }
+      },
+      "required": ["email", "role"]
+    },
+    "supplier": {
+      "title": "Supplier",
+      "description": "Wholesale suppliers for inventory",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string", "maxLength": 100 },
+        "contactPerson": { "type": "string", "maxLength": 100 },
+        "phone": { "type": "string", "maxLength": 20 },
+        "email": { "type": "string" },
+        "address": { "type": "string" },
+        "category": { "type": "string" },
+        "balance": { "type": "number", "description": "Current balance with supplier (positive means we owe them)" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["name"]
+    },
+    "supplier_transaction": {
+      "title": "Supplier Transaction",
+      "description": "Transactions with suppliers (Purchase or Payment)",
+      "type": "object",
+      "properties": {
+        "supplierId": { "type": "string" },
+        "type": { "type": "string", "enum": ["PURCHASE", "PAYMENT"] },
+        "amount": { "type": "number" },
+        "title": { "type": "string" },
+        "date": { "type": "string", "format": "date-time" },
+        "paymentMethod": { "type": "string" }
+      },
+      "required": ["supplierId", "type", "amount", "date"]
+    }
+  },
+  "firestore": {
+    "/products/{productId}": { "schema": "product", "description": "Inventory products" },
+    "/sales/{saleId}": { "schema": "sale", "description": "Sales records" },
+    "/expenses/{expenseId}": { "schema": "expense", "description": "Expense records" },
+    "/customers/{customerId}": { "schema": "customer", "description": "Customer profiles" },
+    "/customer_transactions/{transId}": { "schema": "customer_transaction", "description": "Customer ledger records" },
+    "/users/{userId}": { "schema": "user", "description": "User roles and permissions" },
+    "/suppliers/{supplierId}": { "schema": "supplier", "description": "Wholesale suppliers" },
+    "/supplier_transactions/{transId}": { "schema": "supplier_transaction", "description": "Supplier transaction history" }
+  }
+}
