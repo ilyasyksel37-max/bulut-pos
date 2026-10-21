@@ -1,0 +1,332 @@
+@import "tailwindcss";
+
+@keyframes laserSweep {
+  0% {
+    top: 5%;
+    opacity: 0.8;
+  }
+  50% {
+    top: 92%;
+    opacity: 1;
+  }
+  100% {
+    top: 5%;
+    opacity: 0.8;
+  }
+}
+
+.animate-laser {
+  animation: laserSweep 2s ease-in-out infinite;
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.animate-fadeIn {
+  animation: fadeIn 0.15s ease-out forwards;
+}
+
+/* Print Optimization for all tabs, invoices, and thermal receipts */
+@media print {
+  @page {
+    margin: 8mm 10mm 10mm 10mm;
+  }
+
+  /* Reset layout constraints so printed documents span naturally */
+  html, body, #root, #root > div, main {
+    height: auto !important;
+    min-height: 0 !important;
+    max-height: none !important;
+    overflow: visible !important;
+    position: static !important;
+    background: white !important;
+    color: black !important;
+    width: 100% !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    box-shadow: none !important;
+  }
+
+  /* Completely hide app navigation, controls, headers and buttons */
+  aside, nav, header:not(.print-header), footer, .print\:hidden, button, .no-print, input, select, textarea {
+    display: none !important;
+  }
+  
+  /* POS Receipt Print Isolation (A4 vs Thermal) - Works via data attributes or body classes */
+  #pos-receipt-print-root {
+    display: none !important;
+  }
+
+  body[data-receipt-modal-active="true"] #root,
+  body[data-receipt-printing="true"] #root,
+  body[class*="printing-pos-receipt"] #root {
+    display: none !important;
+    visibility: hidden !important;
+    height: 0 !important;
+    max-height: 0 !important;
+    overflow: hidden !important;
+    position: absolute !important;
+    pointer-events: none !important;
+  }
+
+  body[data-receipt-modal-active="true"] div.fixed.inset-0,
+  body[data-receipt-printing="true"] div.fixed.inset-0,
+  body[class*="printing-pos-receipt"] div.fixed.inset-0 {
+    display: none !important;
+  }
+
+  body[data-receipt-modal-active="true"] #pos-receipt-print-root,
+  body[data-receipt-printing="true"] #pos-receipt-print-root,
+  body[class*="printing-pos-receipt"] #pos-receipt-print-root {
+    display: block !important;
+    visibility: visible !important;
+    position: static !important;
+    width: 100% !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    background: white !important;
+    color: black !important;
+  }
+
+  /* Thermal receipt printer mode (80mm / 58mm POS receipt roll) */
+  body[data-receipt-format="thermal"] #pos-receipt-thermal-doc,
+  body.printing-pos-receipt-thermal #pos-receipt-thermal-doc {
+    display: block !important;
+    visibility: visible !important;
+    width: 76mm !important;
+    max-width: 80mm !important;
+    margin: 0 auto !important;
+    padding: 2mm 1mm !important;
+    font-family: 'Courier New', Courier, monospace !important;
+    font-size: 11px !important;
+    line-height: 1.35 !important;
+    color: #000 !important;
+    background: #fff !important;
+  }
+  body[data-receipt-format="thermal"] #pos-receipt-a4-doc,
+  body[data-receipt-format="thermal"] #pos-receipt-items-doc,
+  body.printing-pos-receipt-thermal #pos-receipt-a4-doc,
+  body.printing-pos-receipt-thermal #pos-receipt-items-doc {
+    display: none !important;
+  }
+
+  /* Standard A4 printer mode (All Laser / Inkjet / Tank printers & PDF) */
+  body[data-receipt-format="a4"] #pos-receipt-a4-doc,
+  body.printing-pos-receipt-a4 #pos-receipt-a4-doc {
+    display: block !important;
+    visibility: visible !important;
+    width: 100% !important;
+    max-width: 210mm !important;
+    margin: 0 auto !important;
+    padding: 0 !important;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif !important;
+    font-size: 12px !important;
+    color: #000 !important;
+    background: #fff !important;
+  }
+  body[data-receipt-format="a4"] #pos-receipt-thermal-doc,
+  body[data-receipt-format="a4"] #pos-receipt-items-doc,
+  body.printing-pos-receipt-a4 #pos-receipt-thermal-doc,
+  body.printing-pos-receipt-a4 #pos-receipt-items-doc {
+    display: none !important;
+  }
+
+  /* Individual items print mode */
+  body[data-receipt-format="items"] #pos-receipt-items-doc,
+  body.printing-pos-receipt-items #pos-receipt-items-doc {
+    display: block !important;
+    visibility: visible !important;
+    width: 100% !important;
+    margin: 0 auto !important;
+  }
+  body[data-receipt-format="items"] #pos-receipt-thermal-doc,
+  body[data-receipt-format="items"] #pos-receipt-a4-doc,
+  body.printing-pos-receipt-items #pos-receipt-thermal-doc,
+  body.printing-pos-receipt-items #pos-receipt-a4-doc {
+    display: none !important;
+  }
+  body[data-receipt-format="items"] .receipt-page,
+  body.printing-pos-receipt-items .receipt-page {
+    page-break-after: always !important;
+    break-after: page !important;
+    display: block !important;
+    padding-top: 10mm !important;
+  }
+  body[data-receipt-format="items"] .receipt-page:last-child,
+  body.printing-pos-receipt-items .receipt-page:last-child {
+    page-break-after: auto !important;
+    break-after: auto !important;
+  }
+
+  /* Single sale print isolation */
+  body.printing-single-sale .hide-on-single-print {
+    display: none !important;
+  }
+
+  body.printing-single-sale #single-sale-print-template {
+    display: block !important;
+    visibility: visible !important;
+    width: 100% !important;
+    height: auto !important;
+    margin: 0 !important;
+    padding: 0 !important;
+  }
+
+  body:not(.printing-single-sale) #single-sale-print-template {
+    display: none !important;
+  }
+
+  /* Full statement / modal print unrolling */
+  div.fixed.inset-0 {
+    position: static !important;
+    display: block !important;
+    background: transparent !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    width: 100% !important;
+    height: auto !important;
+    max-height: none !important;
+    overflow: visible !important;
+  }
+
+  div.fixed.inset-0 > div {
+    box-shadow: none !important;
+    border: none !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    height: auto !important;
+    max-height: none !important;
+    position: static !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    overflow: visible !important;
+    display: block !important;
+    background: white !important;
+  }
+
+  .print-area {
+    display: block !important;
+    width: 100% !important;
+    background: white !important;
+    color: black !important;
+  }
+
+  /* Table and page-break optimization */
+  table {
+    width: 100% !important;
+    border-collapse: collapse !important;
+    page-break-inside: auto !important;
+    break-inside: auto !important;
+  }
+
+  tr {
+    page-break-inside: avoid !important;
+    break-inside: avoid !important;
+  }
+
+  thead {
+    display: table-header-group !important;
+  }
+
+  tfoot {
+    display: table-footer-group !important;
+  }
+
+  th, td {
+    border-bottom: 1px solid #cbd5e1 !important;
+    padding: 6px 8px !important;
+    text-align: left !important;
+    color: black !important;
+  }
+
+  /* Page break utilities */
+  .page-break, .print-page-break, .print-break-after {
+    page-break-after: always !important;
+    break-after: page !important;
+  }
+
+  .print-avoid-break, .print-break-inside-avoid {
+    page-break-inside: avoid !important;
+    break-inside: avoid !important;
+  }
+
+  .shadow-xs, .shadow-sm, .shadow-md, .shadow-lg, .shadow-xl, .shadow-2xl {
+    box-shadow: none !important;
+  }
+
+  .receipt-container {
+    width: 80mm !important;
+    margin: 0 auto !important;
+    padding: 10px !important;
+    font-family: monospace !important;
+  }
+
+  /* Force exact color printing */
+  * {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+
+  body.printing-field-order #field-order-print {
+    display: block !important;
+    visibility: visible !important;
+    width: 100% !important;
+  }
+  body:not(.printing-field-order) #field-order-print {
+    display: none !important;
+  }
+
+  /* Universal Print Isolation for Modals & Documents (Quotations, Reports, Z-Report, Customers, Inventory, etc.) */
+  body[class*="printing-"] #root {
+    display: none !important;
+    visibility: hidden !important;
+    height: 0 !important;
+    overflow: hidden !important;
+  }
+
+  body[class*="printing-"] .fixed.inset-0 {
+    position: static !important;
+    background: white !important;
+    display: block !important;
+  }
+  body[class*="printing-"] .fixed.inset-0 > div {
+    max-height: none !important;
+    overflow: visible !important;
+    box-shadow: none !important;
+    border: none !important;
+    width: 100% !important;
+    margin: 0 !important;
+    padding: 0 !important;
+  }
+  body[class*="printing-"] .print\:hidden {
+    display: none !important;
+  }
+  body[class*="printing-"] .hidden.print\:block {
+    display: block !important;
+  }
+}
+
+/* Prevent zooming on iOS focus and disable pinch zoom */
+@media screen and (max-width: 768px) {
+  input, select, textarea {
+    font-size: 16px !important;
+  }
+}
+
+html, body {
+  touch-action: manipulation;
+  overscroll-behavior-y: none;
+}
+
+#pos-receipt-print-root {
+  display: none !important;
+}
+

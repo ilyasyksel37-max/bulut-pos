@@ -1,0 +1,6 @@
+{
+  "name": "POS & Stok Yönetim Sistemi",
+  "description": "Bulut tabanlı, barkodlu satış, stok takibi, detaylı raporlama ve veresiye cari hesap sistemi içeren kapsamlı POS çözümü.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
