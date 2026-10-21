@@ -41,7 +41,10 @@ import {
   Utensils,
   Smartphone,
   ChefHat,
-  Power
+  Warehouse,
+  ArrowLeftRight,
+  Power,
+  Barcode
 } from 'lucide-react';
 import { 
   collection, 
@@ -64,6 +67,7 @@ import {
   DEFAULT_STAFF_PERMISSIONS, 
   DEFAULT_ADMIN_PERMISSIONS,
   STORE_STAFF_PERMISSIONS,
+  WAREHOUSE_STAFF_PERMISSIONS,
   FIELD_STAFF_PERMISSIONS,
   StaffType
 } from '../context/AuthContext';
@@ -96,19 +100,27 @@ export const PERMISSION_ITEMS: {
   label: string;
   description: string;
   icon: any;
-  category: 'Temel Modüller' | 'İşlem Yetkileri';
+  category: 'Temel Modüller' | 'İşlem Yetkileri' | 'Depo & Lokasyon Yetkileri';
 }[] = [
   { key: 'pos', label: 'Hızlı Satış (POS)', description: 'Kasada barkodlu ve veresiye perakende satış yapabilme', icon: ShoppingCart, category: 'Temel Modüller' },
+  { key: 'warehouse', label: 'Depo Yönetimi (Modül Erişimi)', description: 'Depo stokları, sevkiyat ve transfer ekranına erişebilme', icon: Warehouse, category: 'Temel Modüller' },
   { key: 'field_orders', label: 'Saha Siparişleri', description: 'Müşteri ziyaretlerinde sipariş oluşturma ve merkez şubeye iletme', icon: Truck, category: 'Temel Modüller' },
   { key: 'customers', label: 'Müşteriler & Cari', description: 'Müşteri bakiyesi, veresiye borç defteri ve tahsilat alma', icon: Users, category: 'Temel Modüller' },
-  { key: 'inventory', label: 'Stok Yönetimi', description: 'Ürün listesi, stok miktarları ve kritik seviyeleri görme', icon: Package, category: 'Temel Modüller' },
+  { key: 'inventory', label: 'Stok Yönetimi (Mağaza & Depo Stokları Görünürlüğü)', description: 'Tüm mağaza ve depo stok miktarlarını anlık görüntüleme yetkisi', icon: Package, category: 'Temel Modüller' },
   { key: 'kasa', label: 'Kasa Yönetimi', description: 'TL, Dolar ve Euro kasalarını görme ve nakit hareketi kaydetme', icon: Landmark, category: 'Temel Modüller' },
   { key: 'suppliers', label: 'Tedarikçiler', description: 'Tedarikçi borçları ve mal alımlarını takip etme', icon: Building2, category: 'Temel Modüller' },
+  { key: 'barcode', label: 'Barkod Oluştur & Etiket Basımı', description: 'Özel ürün barkodu üretme, raf ve ürün etiket basımı', icon: Barcode, category: 'Temel Modüller' },
   { key: 'dashboard', label: 'Raporlar & Ciro', description: 'Günlük ve aylık mağaza ciro ve kar raporlarını görme', icon: LayoutDashboard, category: 'Temel Modüller' },
   { key: 'expenses', label: 'Gider Yönetimi', description: 'İşletme masraf ve harcamalarını kaydetme', icon: Receipt, category: 'Temel Modüller' },
   { key: 'personnel', label: 'Personel Yönetimi', description: 'Personel kullanıcı adı, şifre ve yetkilerini düzenleme', icon: Users, category: 'Temel Modüller' },
   { key: 'settings', label: 'Sistem Ayarları', description: 'İşletme ve program ayarlarını değiştirme', icon: Settings, category: 'Temel Modüller' },
   
+  // Depo & Lokasyon Yetkileri (Özel Yetki Anahtarları)
+  { key: 'depoYonetimErisimi', label: 'Depo Yönetim Erişimi', description: 'Depo yönetimi sekmesi ve lokasyon verilerine tam erişim', icon: Warehouse, category: 'Depo & Lokasyon Yetkileri' },
+  { key: 'depoSatisYetkisi', label: 'Depo Satış Yetkisi', description: 'Depo stoku üzerinden perakende ve cariye doğrudan satış/fatura kesebilme', icon: ShoppingCart, category: 'Depo & Lokasyon Yetkileri' },
+  { key: 'depoTransferYetkisi', label: 'Depo Transfer Yetkisi', description: 'Mağaza ve Depo arasında stok transferi gerçekleştirebilme', icon: ArrowLeftRight, category: 'Depo & Lokasyon Yetkileri' },
+  { key: 'sahaSiparisYetkisi', label: 'Saha Sipariş Yetkisi', description: 'Saha elemanı olarak depoya anlık sipariş/mal talebi girebilme', icon: Truck, category: 'Depo & Lokasyon Yetkileri' },
+
   // Hassas İşlem İzinleri
   { key: 'canDiscount', label: 'İskonto / İndirim Yapma', description: 'Satış anında müşteriye sepet veya ürün indirimi uygulayabilme', icon: Tag, category: 'İşlem Yetkileri' },
   { key: 'canFulfillOrders', label: 'Sipariş Hazırlama & Onay', description: 'Merkez şubede saha siparişini onaylayıp stoktan düşebilme', icon: CheckCircle2, category: 'İşlem Yetkileri' },
@@ -140,8 +152,24 @@ export const Personnel: React.FC = () => {
   const [showPasswordMap, setShowPasswordMap] = useState<Record<string, boolean>>({});
   const [isSubmitting, setIsSubmitting] = useState(false);
 
+  // Toggle state for Cafe & Restaurant Module in modals (default closed)
+  const [isCafeRoleEnabled, setIsCafeRoleEnabled] = useState(false);
+  const [isEditCafeRoleEnabled, setIsEditCafeRoleEnabled] = useState(false);
+
   // Form state for creating personnel
-  const [formData, setFormData] = useState({
+  const [formData, setFormData] = useState<{
+    displayName: string;
+    username: string;
+    password: string;
+    sellerCode: string;
+    phone: string;
+    annualLeaveQuota: number;
+    receivableAmount: number;
+    role: 'admin' | 'staff';
+    staffType: StaffType;
+    cafeRole: 'admin' | 'kasiyer' | 'garson' | 'mutfak' | null | '';
+    permissions: PersonnelPermissions;
+  }>({
     displayName: '',
     username: '',
     password: '',
@@ -149,10 +177,10 @@ export const Personnel: React.FC = () => {
     phone: '',
     annualLeaveQuota: 14,
     receivableAmount: 0,
-    role: 'staff' as 'admin' | 'staff',
-    staffType: 'store' as StaffType,
-    cafeRole: 'garson' as 'admin' | 'kasiyer' | 'garson' | 'mutfak',
-    permissions: { ...STORE_STAFF_PERMISSIONS }
+    role: 'staff',
+    staffType: 'store',
+    cafeRole: null,
+    permissions: { ...STORE_STAFF_PERMISSIONS, canAccessCafe: false, isGarson: false, isMutfak: false }
   });
 
   // Attendance form state
@@ -260,8 +288,8 @@ export const Personnel: React.FC = () => {
     }
   };
 
-  // Quick preset permissions applier matching the 3 tenant roles
-  const applyPreset = (preset: 'admin' | 'store' | 'field' | 'all') => {
+  // Quick preset permissions applier matching the tenant roles
+  const applyPreset = (preset: 'admin' | 'store' | 'warehouse' | 'field' | 'all') => {
     let p: PersonnelPermissions = { ...STORE_STAFF_PERMISSIONS };
     let role: 'admin' | 'staff' = 'staff';
     let staffType: StaffType = 'store';
@@ -270,6 +298,25 @@ export const Personnel: React.FC = () => {
       p = { ...DEFAULT_ADMIN_PERMISSIONS };
       role = 'admin';
       staffType = 'admin';
+    } else if (preset === 'warehouse') {
+      // 3. Depo Görevlisi Şablonu: Depo modülleri ve mağaza stoklarını görebilmesi için inventory kutucuğu otomatik işaretlenir
+      p = { 
+        ...WAREHOUSE_STAFF_PERMISSIONS,
+        warehouse: true,
+        depoYonetimErisimi: true,
+        depoSatisYetkisi: true,
+        depoTransferYetkisi: true,
+        sahaSiparisYetkisi: false,
+        inventory: true, // Stok Yönetimi / Mağaza Stokları görünürlüğü
+        canFulfillOrders: true,
+        pos: false,
+        kasa: false,
+        dashboard: false,
+        expenses: false,
+        field_orders: false,
+      };
+      role = 'staff';
+      staffType = 'warehouse';
     } else if (preset === 'field') {
       p = { ...FIELD_STAFF_PERMISSIONS };
       role = 'staff';
@@ -281,15 +328,41 @@ export const Personnel: React.FC = () => {
       staffType = 'store';
     }
 
+    // 2. Hızlı Şablon Seçildiğinde Rolü Sıfırla:
+    // Bir şablon seçildiğinde varsa seçili Kafe/Restoran rolü otomatik temizlenir ve kafe modülü kapalı konuma getirilir.
+    setIsCafeRoleEnabled(false);
+    setIsEditCafeRoleEnabled(false);
+
+    p = {
+      ...p,
+      canAccessCafe: preset === 'admin',
+      isGarson: preset === 'admin',
+      isMutfak: preset === 'admin',
+    };
+
     if (editingPermissionsUser) {
-      setEditingPermissionsUser({ ...editingPermissionsUser, role, staffType, permissions: p });
+      setEditingPermissionsUser({
+        ...editingPermissionsUser,
+        role,
+        staffType,
+        cafeRole: null as any,
+        permissions: p
+      });
     } else {
-      setFormData(prev => ({ ...prev, role, staffType, permissions: p }));
+      setFormData(prev => ({
+        ...prev,
+        role,
+        staffType,
+        cafeRole: null as any,
+        permissions: p
+      }));
     }
   };
 
   // Cafe role automatic permissions preset
   const applyCafeRolePreset = (cafeRole: 'garson' | 'kasiyer' | 'mutfak' | 'admin') => {
+    setIsCafeRoleEnabled(true);
+    setIsEditCafeRoleEnabled(true);
     let p: PersonnelPermissions = { ...STORE_STAFF_PERMISSIONS };
     let role: 'admin' | 'staff' = 'staff';
     let staffType: StaffType = 'store';
@@ -401,6 +474,13 @@ export const Personnel: React.FC = () => {
 
     setIsSubmitting(true);
     try {
+      const updatedPermissions = {
+        ...editingPermissionsUser.permissions,
+        canAccessCafe: isEditCafeRoleEnabled && Boolean(editingPermissionsUser.permissions?.canAccessCafe),
+        isGarson: isEditCafeRoleEnabled && Boolean(editingPermissionsUser.permissions?.isGarson),
+        isMutfak: isEditCafeRoleEnabled && Boolean(editingPermissionsUser.permissions?.isMutfak),
+      };
+
       await updateDoc(doc(db, 'users', editingPermissionsUser.id), {
         displayName: cleanDisplayName || cleanUsername,
         username: cleanUsername,
@@ -408,12 +488,37 @@ export const Personnel: React.FC = () => {
         sellerCode: cleanSellerCode,
         phone: editingPermissionsUser.phone || null,
         annualLeaveQuota: Number(editingPermissionsUser.annualLeaveQuota || 14),
-        receivableAmount: Number(editingPermissionsUser.receivableAmount || 0),
-        permissions: editingPermissionsUser.permissions,
+        permissions: updatedPermissions,
         role: editingPermissionsUser.role,
-        cafeRole: editingPermissionsUser.cafeRole || 'garson',
+        staffType: editingPermissionsUser.staffType || 'store',
+        cafeRole: isEditCafeRoleEnabled && editingPermissionsUser.cafeRole ? editingPermissionsUser.cafeRole : null,
         updatedAt: serverTimestamp()
       });
+
+      // Instantly sync active session if current logged in user is being modified
+      try {
+        const saved = localStorage.getItem('sep_session');
+        if (saved) {
+          const parsed = JSON.parse(saved);
+          if (parsed.user?.id === editingPermissionsUser.id || parsed.user?.uid === editingPermissionsUser.id || parsed.user?.username === cleanUsername) {
+            localStorage.setItem('sep_session', JSON.stringify({
+              ...parsed,
+              user: {
+                ...parsed.user,
+                displayName: cleanDisplayName || cleanUsername,
+                username: cleanUsername,
+                password: cleanPassword,
+                sellerCode: cleanSellerCode,
+                permissions: updatedPermissions,
+                role: editingPermissionsUser.role,
+                staffType: editingPermissionsUser.staffType || 'store',
+                cafeRole: isEditCafeRoleEnabled && editingPermissionsUser.cafeRole ? editingPermissionsUser.cafeRole : null,
+              }
+            }));
+          }
+        }
+      } catch (e) {}
+
       alert(`✅ ${cleanDisplayName || cleanUsername} kullanıcı bilgileri, şifresi ve modül yetkileri başarıyla güncellendi!`);
       setEditingPermissionsUser(null);
     } catch (err: any) {
@@ -519,11 +624,16 @@ export const Personnel: React.FC = () => {
         receivableAmount: Number(formData.receivableAmount || 0),
         role: formData.role,
         staffType: formData.staffType || (formData.role === 'admin' ? 'admin' : 'store'),
-        cafeRole: formData.cafeRole || 'garson',
+        cafeRole: isCafeRoleEnabled && formData.cafeRole ? formData.cafeRole : null,
         tenantId,
         tenantName,
         isActive: true,
-        permissions: formData.permissions,
+        permissions: {
+          ...formData.permissions,
+          canAccessCafe: isCafeRoleEnabled && Boolean(formData.permissions?.canAccessCafe),
+          isGarson: isCafeRoleEnabled && Boolean(formData.permissions?.isGarson),
+          isMutfak: isCafeRoleEnabled && Boolean(formData.permissions?.isMutfak),
+        },
         createdAt: new Date().toISOString(),
         updatedAt: serverTimestamp()
       };
@@ -533,6 +643,7 @@ export const Personnel: React.FC = () => {
       alert(`🎉 Personel başarıyla oluşturuldu!\n\nİşletme: ${tenantName}\nKullanıcı Adı: ${cleanUsername}\nŞifre: ${cleanPassword}\nSatış Kodu: [${cleanCode}]\n\nPersonel bu bilgilerle 'Personel Girişi' ekranından anında sisteme giriş yapabilir.`);
       
       setIsAddModalOpen(false);
+      setIsCafeRoleEnabled(false);
       setFormData({
         displayName: '',
         username: '',
@@ -543,8 +654,8 @@ export const Personnel: React.FC = () => {
         receivableAmount: 0,
         role: 'staff',
         staffType: 'store',
-        cafeRole: 'garson',
-        permissions: { ...STORE_STAFF_PERMISSIONS }
+        cafeRole: null,
+        permissions: { ...STORE_STAFF_PERMISSIONS, canAccessCafe: false, isGarson: false, isMutfak: false }
       });
     } catch (err: any) {
       console.error(err);
@@ -724,6 +835,20 @@ export const Personnel: React.FC = () => {
           <button
             onClick={() => {
               if (checkDemoRestricted("Personel ekleme")) return;
+              setIsCafeRoleEnabled(false);
+              setFormData({
+                displayName: '',
+                username: '',
+                password: '',
+                sellerCode: `E0${users.length + 1}`,
+                phone: '',
+                annualLeaveQuota: 14,
+                receivableAmount: 0,
+                role: 'staff',
+                staffType: 'store',
+                cafeRole: null,
+                permissions: { ...STORE_STAFF_PERMISSIONS, canAccessCafe: false, isGarson: false, isMutfak: false }
+              });
               setIsAddModalOpen(true);
             }}
             className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2.5 rounded-xl flex items-center justify-center gap-2 font-black text-xs sm:text-sm transition-all shadow-lg shadow-blue-600/20 active:scale-95"
@@ -904,11 +1029,13 @@ export const Personnel: React.FC = () => {
                               <span className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase ${
                                 u.role === 'admin' 
                                   ? 'bg-purple-100 text-purple-700' 
+                                  : u.staffType === 'warehouse'
+                                  ? 'bg-amber-100 text-amber-800'
                                   : u.staffType === 'field'
                                   ? 'bg-emerald-100 text-emerald-800'
                                   : 'bg-blue-100 text-blue-700'
                               }`}>
-                                {u.role === 'admin' ? '🏢 Yönetici' : u.staffType === 'field' ? '🚚 Saha Satış' : '🏬 Mağaza (Kasiyer)'}
+                                {u.role === 'admin' ? '🏢 Yönetici' : u.staffType === 'warehouse' ? '📦 Depo Görevlisi' : u.staffType === 'field' ? '🚚 Saha Satış' : '🏬 Mağaza (Kasiyer)'}
                               </span>
 
                               <button
@@ -956,6 +1083,7 @@ export const Personnel: React.FC = () => {
                             <div className="flex items-center justify-end gap-1.5">
                               <button
                                 onClick={() => {
+                                  setIsEditCafeRoleEnabled(Boolean(u.cafeRole && u.permissions?.canAccessCafe));
                                   setEditingPermissionsUser({
                                     ...u,
                                     permissions: { ...userPerms }
@@ -1297,76 +1425,7 @@ export const Personnel: React.FC = () => {
                 </div>
               </div>
 
-              {/* Cafe & Restaurant Role Selector */}
-              <div className="pt-2 border-t border-slate-100">
-                <div className="mb-3">
-                  <label className="text-xs font-black uppercase text-orange-800 tracking-wider block mb-1">
-                    ☕ Kafe & Restoran Rolü (Modül Yetkisi):
-                  </label>
-                  <p className="text-[11px] text-slate-500 mb-2">
-                    Bu personelin Kafe & Restoran modülünde hangi ekrana erişebileceğini seçin:
-                  </p>
-                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-                    <button
-                      type="button"
-                      onClick={() => applyCafeRolePreset('garson')}
-                      className={`p-2 rounded-xl border text-center transition-all ${
-                        formData.cafeRole === 'garson'
-                          ? 'bg-orange-50 border-orange-500 ring-2 ring-orange-500/20 text-orange-900 font-black shadow-xs'
-                          : 'bg-white border-slate-200 text-slate-600 hover:border-orange-300 font-bold'
-                      }`}
-                    >
-                      <div className="text-sm mb-0.5">🤵</div>
-                      <div className="text-[11px]">Garson (Mobil)</div>
-                      <div className="text-[9px] text-slate-400">Sipariş & Gönder</div>
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={() => applyCafeRolePreset('kasiyer')}
-                      className={`p-2 rounded-xl border text-center transition-all ${
-                        formData.cafeRole === 'kasiyer'
-                          ? 'bg-emerald-50 border-emerald-500 ring-2 ring-emerald-500/20 text-emerald-900 font-black shadow-xs'
-                          : 'bg-white border-slate-200 text-slate-600 hover:border-emerald-300 font-bold'
-                      }`}
-                    >
-                      <div className="text-sm mb-0.5">💳</div>
-                      <div className="text-[11px]">Kasa / Kasiyer</div>
-                      <div className="text-[9px] text-slate-400">Hesap Kapatma</div>
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={() => applyCafeRolePreset('mutfak')}
-                      className={`p-2 rounded-xl border text-center transition-all ${
-                        formData.cafeRole === 'mutfak'
-                          ? 'bg-amber-50 border-amber-500 ring-2 ring-amber-500/20 text-amber-900 font-black shadow-xs'
-                          : 'bg-white border-slate-200 text-slate-600 hover:border-amber-300 font-bold'
-                      }`}
-                    >
-                      <div className="text-sm mb-0.5">🍳</div>
-                      <div className="text-[11px]">Mutfak / Bar (KDS)</div>
-                      <div className="text-[9px] text-slate-400">Sipariş Takibi</div>
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={() => applyCafeRolePreset('admin')}
-                      className={`p-2 rounded-xl border text-center transition-all ${
-                        formData.cafeRole === 'admin'
-                          ? 'bg-purple-50 border-purple-500 ring-2 ring-purple-500/20 text-purple-900 font-black shadow-xs'
-                          : 'bg-white border-slate-200 text-slate-600 hover:border-purple-300 font-bold'
-                      }`}
-                    >
-                      <div className="text-sm mb-0.5">👑</div>
-                      <div className="text-[11px]">Şef / Admin</div>
-                      <div className="text-[9px] text-slate-400">Tam Yetki</div>
-                    </button>
-                  </div>
-                </div>
-              </div>
-
-              {/* 3 Tenant Roles Preset Selector */}
+              {/* 1. Tenant Roles Preset Selector (Hızlı Şablon) */}
               <div className="pt-2 border-t border-slate-100">
                 <div className="mb-2">
                   <label className="text-xs font-black uppercase text-slate-700 tracking-wider block mb-1">
@@ -1375,12 +1434,12 @@ export const Personnel: React.FC = () => {
                   <p className="text-[11px] text-slate-500 mb-2">
                     Personelin işletmenizdeki görevine göre hazır yetki setini tek tıkla seçebilirsiniz:
                   </p>
-                  <div className="grid grid-cols-3 gap-2">
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
                     <button
                       type="button"
                       onClick={() => applyPreset('store')}
                       className={`p-2.5 rounded-xl border text-center transition-all ${
-                        formData.staffType === 'store' && formData.role === 'staff'
+                        formData.staffType === 'store' && formData.role === 'staff' && !isCafeRoleEnabled
                           ? 'bg-blue-50 border-blue-500 ring-2 ring-blue-500/20 text-blue-900 font-black shadow-xs'
                           : 'bg-white border-slate-200 text-slate-600 hover:border-blue-300 font-bold'
                       }`}
@@ -1392,9 +1451,23 @@ export const Personnel: React.FC = () => {
 
                     <button
                       type="button"
+                      onClick={() => applyPreset('warehouse')}
+                      className={`p-2.5 rounded-xl border text-center transition-all ${
+                        formData.staffType === 'warehouse' && formData.role === 'staff' && !isCafeRoleEnabled
+                          ? 'bg-amber-50 border-amber-500 ring-2 ring-amber-500/20 text-amber-900 font-black shadow-xs'
+                          : 'bg-white border-slate-200 text-slate-600 hover:border-amber-300 font-bold'
+                      }`}
+                    >
+                      <div className="text-sm mb-0.5">📦</div>
+                      <div className="text-xs text-amber-950">Depo Görevlisi</div>
+                      <div className="text-[10px] text-amber-700/80 font-normal">Depo & Mağaza Stoku</div>
+                    </button>
+
+                    <button
+                      type="button"
                       onClick={() => applyPreset('field')}
                       className={`p-2.5 rounded-xl border text-center transition-all ${
-                        formData.staffType === 'field' && formData.role === 'staff'
+                        formData.staffType === 'field' && formData.role === 'staff' && !isCafeRoleEnabled
                           ? 'bg-emerald-50 border-emerald-500 ring-2 ring-emerald-500/20 text-emerald-900 font-black shadow-xs'
                           : 'bg-white border-slate-200 text-slate-600 hover:border-emerald-300 font-bold'
                       }`}
@@ -1408,7 +1481,7 @@ export const Personnel: React.FC = () => {
                       type="button"
                       onClick={() => applyPreset('admin')}
                       className={`p-2.5 rounded-xl border text-center transition-all ${
-                        formData.role === 'admin'
+                        formData.role === 'admin' && !isCafeRoleEnabled
                           ? 'bg-purple-50 border-purple-500 ring-2 ring-purple-500/20 text-purple-900 font-black shadow-xs'
                           : 'bg-white border-slate-200 text-slate-600 hover:border-purple-300 font-bold'
                       }`}
@@ -1419,8 +1492,144 @@ export const Personnel: React.FC = () => {
                     </button>
                   </div>
                 </div>
+              </div>
 
-                {/* Permission Checkboxes Grid */}
+              {/* 2. Cafe & Restaurant Role (Açılır / Kapanır Toggle) */}
+              <div className="pt-2 border-t border-slate-100">
+                <div className={`p-3.5 rounded-2xl border transition-all ${
+                  isCafeRoleEnabled 
+                    ? 'bg-orange-50/70 border-orange-200 ring-1 ring-orange-400/20' 
+                    : 'bg-slate-50/60 border-slate-200/80'
+                }`}>
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="flex items-center gap-2.5">
+                      <div className={`w-8 h-8 rounded-xl flex items-center justify-center font-bold text-base transition-colors ${
+                        isCafeRoleEnabled ? 'bg-orange-100 text-orange-700' : 'bg-slate-200/70 text-slate-500'
+                      }`}>
+                        ☕
+                      </div>
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <label 
+                            htmlFor="toggle-cafe-add" 
+                            className="text-xs font-black uppercase text-slate-800 tracking-wider cursor-pointer"
+                          >
+                            Kafe & Restoran Rolü (Modül Yetkisi)
+                          </label>
+                          <span className={`text-[9px] px-2 py-0.5 rounded-full font-bold uppercase transition-all ${
+                            isCafeRoleEnabled 
+                              ? 'bg-orange-500 text-white' 
+                              : 'bg-slate-200 text-slate-600'
+                          }`}>
+                            {isCafeRoleEnabled ? 'Açık' : 'Kapalı'}
+                          </span>
+                        </div>
+                        <p className="text-[11px] text-slate-500 mt-0.5">
+                          Personel kafe/restoran alanında çalışacaksa anahtarı açarak rolünü belirleyin.
+                        </p>
+                      </div>
+                    </div>
+
+                    {/* Toggle Switch */}
+                    <label className="relative inline-flex items-center cursor-pointer shrink-0">
+                      <input
+                        id="toggle-cafe-add"
+                        type="checkbox"
+                        checked={isCafeRoleEnabled}
+                        onChange={(e) => {
+                          const checked = e.target.checked;
+                          setIsCafeRoleEnabled(checked);
+                          if (checked) {
+                            applyCafeRolePreset('garson');
+                          } else {
+                            setFormData(prev => ({
+                              ...prev,
+                              cafeRole: null as any,
+                              permissions: {
+                                ...prev.permissions,
+                                canAccessCafe: false,
+                                isGarson: false,
+                                isMutfak: false,
+                              }
+                            }));
+                          }
+                        }}
+                        className="sr-only peer"
+                      />
+                      <div className="w-11 h-6 bg-slate-300 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-orange-600"></div>
+                    </label>
+                  </div>
+
+                  {/* Sadece toggle açık olduğunda görünen roller */}
+                  {isCafeRoleEnabled && (
+                    <div className="mt-3 pt-3 border-t border-orange-200/60 animate-fadeIn">
+                      <p className="text-[11px] font-bold text-orange-900 mb-2">
+                        Bu personelin Kafe & Restoran modülünde hangi ekrana erişebileceğini seçin:
+                      </p>
+                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                        <button
+                          type="button"
+                          onClick={() => applyCafeRolePreset('garson')}
+                          className={`p-2 rounded-xl border text-center transition-all ${
+                            formData.cafeRole === 'garson'
+                              ? 'bg-orange-500 border-orange-600 text-white font-black shadow-xs'
+                              : 'bg-white border-slate-200 text-slate-700 hover:border-orange-300 font-bold'
+                          }`}
+                        >
+                          <div className="text-sm mb-0.5">🤵</div>
+                          <div className="text-[11px]">Garson (Mobil)</div>
+                          <div className={`text-[9px] ${formData.cafeRole === 'garson' ? 'text-orange-100' : 'text-slate-400'}`}>Sipariş & Gönder</div>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => applyCafeRolePreset('kasiyer')}
+                          className={`p-2 rounded-xl border text-center transition-all ${
+                            formData.cafeRole === 'kasiyer'
+                              ? 'bg-emerald-600 border-emerald-700 text-white font-black shadow-xs'
+                              : 'bg-white border-slate-200 text-slate-700 hover:border-emerald-300 font-bold'
+                          }`}
+                        >
+                          <div className="text-sm mb-0.5">💳</div>
+                          <div className="text-[11px]">Kasa / Kasiyer</div>
+                          <div className={`text-[9px] ${formData.cafeRole === 'kasiyer' ? 'text-emerald-100' : 'text-slate-400'}`}>Hesap Kapatma</div>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => applyCafeRolePreset('mutfak')}
+                          className={`p-2 rounded-xl border text-center transition-all ${
+                            formData.cafeRole === 'mutfak'
+                              ? 'bg-amber-600 border-amber-700 text-white font-black shadow-xs'
+                              : 'bg-white border-slate-200 text-slate-700 hover:border-amber-300 font-bold'
+                          }`}
+                        >
+                          <div className="text-sm mb-0.5">🍳</div>
+                          <div className="text-[11px]">Mutfak / Bar (KDS)</div>
+                          <div className={`text-[9px] ${formData.cafeRole === 'mutfak' ? 'text-amber-100' : 'text-slate-400'}`}>Sipariş Takibi</div>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => applyCafeRolePreset('admin')}
+                          className={`p-2 rounded-xl border text-center transition-all ${
+                            formData.cafeRole === 'admin'
+                              ? 'bg-purple-600 border-purple-700 text-white font-black shadow-xs'
+                              : 'bg-white border-slate-200 text-slate-700 hover:border-purple-300 font-bold'
+                          }`}
+                        >
+                          <div className="text-sm mb-0.5">👑</div>
+                          <div className="text-[11px]">Şef / Admin</div>
+                          <div className={`text-[9px] ${formData.cafeRole === 'admin' ? 'text-purple-100' : 'text-slate-400'}`}>Tam Yetki</div>
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* 3. Program Modül Yetkileri (Checkboxes Grid) */}
+              <div className="pt-2 border-t border-slate-100">
                 <div className="space-y-3 bg-slate-50 p-4 rounded-2xl border border-slate-200/80 max-h-72 overflow-y-auto">
                   <p className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">
                     Programda Aktif Olarak Kullanabileceği Modüller (Tikleyin):
@@ -1592,76 +1801,148 @@ export const Personnel: React.FC = () => {
                 </div>
               </div>
 
-              {/* Cafe & Restaurant Role Selector for Edit */}
-              <div className="bg-orange-50/50 p-4 rounded-2xl border border-orange-200/60 space-y-2">
-                <label className="text-xs font-black uppercase text-orange-900 tracking-wider block">
-                  ☕ Kafe & Restoran Modülü Rolü:
-                </label>
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-                  <button
-                    type="button"
-                    onClick={() => applyCafeRolePreset('garson')}
-                    className={`p-2 rounded-xl border text-center transition-all ${
-                      (editingPermissionsUser.cafeRole || 'garson') === 'garson'
-                        ? 'bg-orange-600 border-orange-700 text-white font-black shadow-xs'
-                        : 'bg-white border-slate-200 text-slate-700 hover:border-orange-300 font-bold'
-                    }`}
-                  >
-                    <div className="text-sm mb-0.5">🤵</div>
-                    <div className="text-[11px]">Garson (Mobil)</div>
-                  </button>
+              {/* Cafe & Restaurant Role Selector for Edit (Açılır / Kapanır Toggle) */}
+              <div className={`p-3.5 rounded-2xl border transition-all ${
+                isEditCafeRoleEnabled 
+                  ? 'bg-orange-50/70 border-orange-200 ring-1 ring-orange-400/20' 
+                  : 'bg-slate-50/60 border-slate-200/80'
+              }`}>
+                <div className="flex items-center justify-between gap-3">
+                  <div className="flex items-center gap-2.5">
+                    <div className={`w-8 h-8 rounded-xl flex items-center justify-center font-bold text-base transition-colors ${
+                      isEditCafeRoleEnabled ? 'bg-orange-100 text-orange-700' : 'bg-slate-200/70 text-slate-500'
+                    }`}>
+                      ☕
+                    </div>
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <label 
+                          htmlFor="toggle-cafe-edit" 
+                          className="text-xs font-black uppercase text-slate-800 tracking-wider cursor-pointer"
+                        >
+                          Kafe & Restoran Rolü (Modül Yetkisi)
+                        </label>
+                        <span className={`text-[9px] px-2 py-0.5 rounded-full font-bold uppercase transition-all ${
+                          isEditCafeRoleEnabled 
+                            ? 'bg-orange-500 text-white' 
+                            : 'bg-slate-200 text-slate-600'
+                        }`}>
+                          {isEditCafeRoleEnabled ? 'Açık' : 'Kapalı'}
+                        </span>
+                      </div>
+                      <p className="text-[11px] text-slate-500 mt-0.5">
+                        Personel kafe/restoran alanında çalışacaksa anahtarı açarak rolünü güncelleyin.
+                      </p>
+                    </div>
+                  </div>
 
-                  <button
-                    type="button"
-                    onClick={() => applyCafeRolePreset('kasiyer')}
-                    className={`p-2 rounded-xl border text-center transition-all ${
-                      editingPermissionsUser.cafeRole === 'kasiyer'
-                        ? 'bg-emerald-600 border-emerald-700 text-white font-black shadow-xs'
-                        : 'bg-white border-slate-200 text-slate-700 hover:border-emerald-300 font-bold'
-                    }`}
-                  >
-                    <div className="text-sm mb-0.5">💳</div>
-                    <div className="text-[11px]">Kasa / Kasiyer</div>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => applyCafeRolePreset('mutfak')}
-                    className={`p-2 rounded-xl border text-center transition-all ${
-                      editingPermissionsUser.cafeRole === 'mutfak'
-                        ? 'bg-amber-600 border-amber-700 text-white font-black shadow-xs'
-                        : 'bg-white border-slate-200 text-slate-700 hover:border-amber-300 font-bold'
-                    }`}
-                  >
-                    <div className="text-sm mb-0.5">🍳</div>
-                    <div className="text-[11px]">Mutfak (KDS)</div>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => applyCafeRolePreset('admin')}
-                    className={`p-2 rounded-xl border text-center transition-all ${
-                      editingPermissionsUser.cafeRole === 'admin'
-                        ? 'bg-purple-600 border-purple-700 text-white font-black shadow-xs'
-                        : 'bg-white border-slate-200 text-slate-700 hover:border-purple-300 font-bold'
-                    }`}
-                  >
-                    <div className="text-sm mb-0.5">👑</div>
-                    <div className="text-[11px]">Şef / Admin</div>
-                  </button>
+                  {/* Toggle Switch */}
+                  <label className="relative inline-flex items-center cursor-pointer shrink-0">
+                    <input
+                      id="toggle-cafe-edit"
+                      type="checkbox"
+                      checked={isEditCafeRoleEnabled}
+                      onChange={(e) => {
+                        const checked = e.target.checked;
+                        setIsEditCafeRoleEnabled(checked);
+                        if (checked) {
+                          applyCafeRolePreset(editingPermissionsUser.cafeRole || 'garson');
+                        } else {
+                          setEditingPermissionsUser({
+                            ...editingPermissionsUser,
+                            cafeRole: null as any,
+                            permissions: {
+                              ...(editingPermissionsUser.permissions || DEFAULT_STAFF_PERMISSIONS),
+                              canAccessCafe: false,
+                              isGarson: false,
+                              isMutfak: false,
+                            }
+                          });
+                        }
+                      }}
+                      className="sr-only peer"
+                    />
+                    <div className="w-11 h-6 bg-slate-300 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-orange-600"></div>
+                  </label>
                 </div>
+
+                {/* Sadece toggle açık olduğunda görünen roller */}
+                {isEditCafeRoleEnabled && (
+                  <div className="mt-3 pt-3 border-t border-orange-200/60 animate-fadeIn">
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                      <button
+                        type="button"
+                        onClick={() => applyCafeRolePreset('garson')}
+                        className={`p-2 rounded-xl border text-center transition-all ${
+                          (editingPermissionsUser.cafeRole || 'garson') === 'garson'
+                            ? 'bg-orange-600 border-orange-700 text-white font-black shadow-xs'
+                            : 'bg-white border-slate-200 text-slate-700 hover:border-orange-300 font-bold'
+                        }`}
+                      >
+                        <div className="text-sm mb-0.5">🤵</div>
+                        <div className="text-[11px]">Garson (Mobil)</div>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => applyCafeRolePreset('kasiyer')}
+                        className={`p-2 rounded-xl border text-center transition-all ${
+                          editingPermissionsUser.cafeRole === 'kasiyer'
+                            ? 'bg-emerald-600 border-emerald-700 text-white font-black shadow-xs'
+                            : 'bg-white border-slate-200 text-slate-700 hover:border-emerald-300 font-bold'
+                        }`}
+                      >
+                        <div className="text-sm mb-0.5">💳</div>
+                        <div className="text-[11px]">Kasa / Kasiyer</div>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => applyCafeRolePreset('mutfak')}
+                        className={`p-2 rounded-xl border text-center transition-all ${
+                          editingPermissionsUser.cafeRole === 'mutfak'
+                            ? 'bg-amber-600 border-amber-700 text-white font-black shadow-xs'
+                            : 'bg-white border-slate-200 text-slate-700 hover:border-amber-300 font-bold'
+                        }`}
+                      >
+                        <div className="text-sm mb-0.5">🍳</div>
+                        <div className="text-[11px]">Mutfak (KDS)</div>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => applyCafeRolePreset('admin')}
+                        className={`p-2 rounded-xl border text-center transition-all ${
+                          editingPermissionsUser.cafeRole === 'admin'
+                            ? 'bg-purple-600 border-purple-700 text-white font-black shadow-xs'
+                            : 'bg-white border-slate-200 text-slate-700 hover:border-purple-300 font-bold'
+                        }`}
+                      >
+                        <div className="text-sm mb-0.5">👑</div>
+                        <div className="text-[11px]">Şef / Admin</div>
+                      </button>
+                    </div>
+                  </div>
+                )}
               </div>
 
               {/* Presets Bar */}
-              <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+              <div className="flex flex-wrap items-center justify-between gap-2 pb-3 border-b border-slate-100">
                 <span className="text-xs font-black uppercase text-slate-700">Hızlı Yetki Şablonu:</span>
-                <div className="flex items-center gap-1.5">
+                <div className="flex flex-wrap items-center gap-1.5">
                   <button
                     type="button"
                     onClick={() => applyPreset('store')}
                     className="px-2.5 py-1 text-xs font-bold rounded-lg bg-blue-50 text-blue-700 hover:bg-blue-100"
                   >
-                    Standart Satış
+                    Mağaza / Kasiyer
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => applyPreset('warehouse')}
+                    className="px-2.5 py-1 text-xs font-black rounded-lg bg-amber-50 text-amber-800 hover:bg-amber-100"
+                  >
+                    Depo Görevlisi
                   </button>
                   <button
                     type="button"
@@ -1672,17 +1953,10 @@ export const Personnel: React.FC = () => {
                   </button>
                   <button
                     type="button"
-                    onClick={() => applyPreset('store')}
-                    className="px-2.5 py-1 text-xs font-bold rounded-lg bg-emerald-50 text-emerald-700 hover:bg-emerald-100"
-                  >
-                    Kasiyer / Kasa
-                  </button>
-                  <button
-                    type="button"
                     onClick={() => applyPreset('all')}
                     className="px-2.5 py-1 text-xs font-bold rounded-lg bg-purple-50 text-purple-700 hover:bg-purple-100"
                   >
-                    Tümünü Aç
+                    Yönetici (Tümünü Aç)
                   </button>
                 </div>
               </div>

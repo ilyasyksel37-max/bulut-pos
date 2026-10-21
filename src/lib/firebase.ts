@@ -1,27 +1,21 @@
 import { initializeApp } from 'firebase/app';
 import { getAuth } from 'firebase/auth';
 import { 
-  initializeFirestore, 
-  persistentLocalCache, 
-  persistentMultipleTabManager,
+  getFirestore, 
+  setLogLevel,
   collection 
 } from 'firebase/firestore';
 import firebaseConfig from '../../firebase-applet-config.json';
 
+// Suppress non-critical warning logs in iframe / preview environments
+try {
+  setLogLevel('error');
+} catch (e) {}
+
 const app = initializeApp(firebaseConfig);
 
-// Initialize Firestore with modern multi-tab persistence and automatic long-polling detection
-// to prevent proxy/iframe 10-second backend connection timeouts.
-export const db = initializeFirestore(
-  app,
-  {
-    localCache: persistentLocalCache({
-      tabManager: persistentMultipleTabManager(),
-    }),
-    experimentalAutoDetectLongPolling: true,
-  },
-  firebaseConfig.firestoreDatabaseId
-);
+// Standard Firestore initialization matching Firebase skill specification
+export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId);
 
 export const auth = getAuth(app);
 

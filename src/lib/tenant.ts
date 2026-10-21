@@ -3,7 +3,7 @@
  * Ensures complete data isolation between different business tenants/stores.
  */
 
-export type StaffType = 'admin' | 'store' | 'field';
+export type StaffType = 'admin' | 'store' | 'field' | 'warehouse';
 
 export interface TenantInfo {
   id: string;
@@ -21,6 +21,7 @@ export interface TenantInfo {
   enabledModules?: Record<string, boolean>;
   modules?: Record<string, boolean>; // Sectoral modules (kirtasiye_modulu, bakkal_market_modulu, tekstil_modulu, esarp_sal_modulu, kozmetik_modulu, tuhafiye_modulu)
   sectoralSettings?: Record<string, any>; // Persistent pricing & config for sectoral modules
+  depoYonetimiAktif?: boolean; // Depo Yönetimi Modülü Aktif mi?
   createdAt?: string;
 }
 
@@ -438,6 +439,7 @@ export const DEFAULT_TENANT: TenantInfo = {
   adminUsername: 'admin_beyoglu',
   phone: '0555 123 45 67',
   address: 'Beyoğlu / İstanbul',
+  depoYonetimiAktif: true,
   enabledModules: getDefaultModulesForPackage('enterprise'),
   modules: {
     kirtasiye_modulu: true,
@@ -577,6 +579,8 @@ export const getStaffTypeBadge = (staffType?: StaffType | string) => {
   switch (staffType) {
     case 'admin':
       return { label: 'İşletme Yöneticisi', badge: 'Yönetici (Tam Yetkili)', color: 'purple' };
+    case 'warehouse':
+      return { label: 'Depo Görevlisi', badge: 'Depo & Sevkiyat (Stok & Transfer)', color: 'amber' };
     case 'field':
       return { label: 'Saha Satış Personeli', badge: 'Saha Elemanı (Sipariş & Cari)', color: 'emerald' };
     case 'store':

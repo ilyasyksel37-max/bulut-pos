@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { collection, onSnapshot, updateDoc, setDoc, doc, addDoc, deleteDoc, serverTimestamp } from 'firebase/firestore';
 import { db, auth } from '../lib/firebase';
 import { updatePassword, signOut } from 'firebase/auth';
-import { Settings as SettingsIcon, Shield, UserCheck, Download, Globe, CheckCircle2, FileArchive, Server, Landmark, Plus, Trash2, Building, Lock, Database, Activity, Layers } from 'lucide-react';
+import { Settings as SettingsIcon, Shield, UserCheck, Download, Globe, CheckCircle2, FileArchive, Server, Landmark, Plus, Trash2, Building, Lock, Database, Activity, Layers, Warehouse } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { Subscription } from './Subscription';
 import { TenantMembershipSettings } from './TenantMembershipSettings';
@@ -13,7 +13,7 @@ import { isDocInTenant, withTenant, isSepetayTenant, SEPETAY_LEGACY_APPLET_ID } 
 
 const Settings: React.FC = () => {
   const [users, setUsers] = useState<any[]>([]);
-  const { role: currentUserRole, isSuperAdmin, tenantId } = useAuth();
+  const { role: currentUserRole, isSuperAdmin, tenantId, currentTenant } = useAuth();
   const [isGlobalSyncOpen, setIsGlobalSyncOpen] = useState(false);
   const [isSepetayStatusOpen, setIsSepetayStatusOpen] = useState(false);
   const [settingsSection, setSettingsSection] = useState<'all' | 'users' | 'bank' | 'system'>('all');
@@ -334,6 +334,42 @@ const Settings: React.FC = () => {
               <span>Eski Ürünleri Global Havuza Aktar (Senkronize Et)</span>
             </button>
           </div>
+        </div>
+      </div>
+
+      {/* Depo Yönetimi Modülü (Aç/Kapat) */}
+      <div className="max-w-2xl bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+        <div className="p-6 border-b border-slate-100 flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-lg bg-indigo-50 border border-indigo-100 flex items-center justify-center text-indigo-600">
+              <Warehouse className="w-5 h-5" />
+            </div>
+            <div>
+              <h3 className="font-bold text-slate-900">Depo Yönetimi Modülü (Aç / Kapat)</h3>
+              <p className="text-xs text-slate-500">Sol ana menüdeki Depo Yönetimi sekmesini ve çoklu lokasyon transferlerini açın veya kapatın.</p>
+            </div>
+          </div>
+          <button
+            onClick={async () => {
+              const currentActive = currentTenant?.depoYonetimiAktif !== false;
+              try {
+                await updateDoc(doc(db, 'tenants', tenantId), {
+                  depoYonetimiAktif: !currentActive,
+                  updatedAt: serverTimestamp()
+                });
+                alert(`✅ Depo Yönetimi Modülü ${!currentActive ? 'açıldı' : 'kapatıldı'}.`);
+              } catch (err: any) {
+                alert("Güncellenemedi: " + err.message);
+              }
+            }}
+            className={`px-4 py-2 rounded-xl text-xs font-black transition-all cursor-pointer ${
+              currentTenant?.depoYonetimiAktif !== false 
+                ? 'bg-emerald-600 hover:bg-emerald-700 text-white shadow-md' 
+                : 'bg-slate-200 hover:bg-slate-300 text-slate-700'
+            }`}
+          >
+            {currentTenant?.depoYonetimiAktif !== false ? 'AÇIK (Kapatmak için tıkla)' : 'KAPALI (Açmak için tıkla)'}
+          </button>
         </div>
       </div>
 

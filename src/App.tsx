@@ -23,6 +23,7 @@ import { SuspendedScreen } from './components/SuspendedScreen';
 import { SectoralModules } from './components/SectoralModules';
 import { CafeRestaurantModule } from './components/CafeRestaurantModule';
 import { PrinterSettings } from './components/PrinterSettings';
+import { WarehouseManagement } from './components/WarehouseManagement';
 import { isDocInTenant, isTenantFeatureEnabled, isTenantSectorModuleEnabled, SECTORAL_MODULES, isSepetayTenant, SEPETAY_LEGACY_APPLET_ID } from './lib/tenant';
 import { 
   LogIn, 
@@ -88,6 +89,7 @@ const getTabTitle = (tab: string) => {
     case 'quotations': return 'Teklifler';
     case 'barcode': return 'Barkod Oluştur';
     case 'inventory': return 'Stok & Ürünler';
+    case 'warehouse': return 'Depo Yönetimi & Transferler';
     case 'customers': return 'Müşteriler & Cari';
     case 'suppliers': return 'Tedarikçiler';
     case 'dashboard': return 'Raporlar & Ciro';
@@ -134,6 +136,12 @@ const AppContent: React.FC = () => {
     user?.staffType === 'mutfak'
   );
 
+  const isWarehouseStaff = Boolean(
+    !isSuperAdmin && role !== 'admin' && (
+      user?.staffType === 'warehouse'
+    )
+  );
+
   const getInitialTab = (): string => {
     if (typeof window !== 'undefined') {
       const hash = window.location.hash.replace('#', '').trim();
@@ -141,6 +149,9 @@ const AppContent: React.FC = () => {
       const params = new URLSearchParams(window.location.search);
       const queryTab = params.get('tab') || params.get('module');
       if (queryTab) return queryTab;
+    }
+    if (isWarehouseStaff) {
+      return 'warehouse';
     }
     if (user?.cafeRole && user.cafeRole !== 'admin') {
       return 'kafe_restoran_modulu';
@@ -172,7 +183,7 @@ const AppContent: React.FC = () => {
         setActiveTab('kafe_restoran_modulu');
       }
     }
-  }, [user, isOrderTaker]);
+  }, [user, isOrderTaker, isWarehouseStaff]);
 
   // Sync with browser address bar hash changes
   React.useEffect(() => {
@@ -872,6 +883,7 @@ const AppContent: React.FC = () => {
       case 'quotations': return <Quotations />;
       case 'barcode': return <BarcodeGenerator />;
       case 'inventory': return <Inventory />;
+      case 'warehouse': return <WarehouseManagement />;
       case 'customers': return (
         <Customers 
           onStartSale={handleStartSaleForCustomer} 

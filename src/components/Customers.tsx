@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { format } from 'date-fns';
+import * as XLSX from 'xlsx';
 import { 
   collection, onSnapshot, query, deleteDoc, doc, 
   addDoc, serverTimestamp 
@@ -11,7 +12,7 @@ import {
   Users, Phone, Star, Plus, Search, Edit2, Trash2, 
   ArrowDownRight, Receipt, CreditCard, Sparkles, Filter, 
   AlertCircle, CheckCircle2, ShoppingBag, Printer, Truck, FileText,
-  Clock, X
+  Clock, X, FileSpreadsheet, Download, UploadCloud
 } from 'lucide-react';
 import { CustomerModal, CustomerData } from './customers/CustomerModal';
 import { CustomerPaymentModal } from './customers/CustomerPaymentModal';
@@ -41,6 +42,7 @@ const Customers: React.FC<CustomersProps> = ({ onStartSale, onStartFieldOrder })
 
   const [isBulkStatementModalOpen, setIsBulkStatementModalOpen] = useState(false);
   const [isInactiveReportModalOpen, setIsInactiveReportModalOpen] = useState(false);
+  const [isExcelImportModalOpen, setIsExcelImportModalOpen] = useState(false);
 
   // Customer activity tracking (Son Alım / İşlem Tarihi & Süresi)
   const [customerActivity, setCustomerActivity] = useState<Record<string, { lastDate: Date; daysAgo: number; lastTitle?: string }>>({});
@@ -54,10 +56,23 @@ const Customers: React.FC<CustomersProps> = ({ onStartSale, onStartFieldOrder })
 
   useEffect(() => {
     const isSep = isSepetayTenant(tenantId);
-    const map = new Map<string, any>();
+    
+    const sourceMaps: Record<string, Map<string, any>> = {
+      sepetay: new Map(),
+      customers: new Map(),
+      musteriler: new Map(),
+      cariler: new Map()
+    };
 
     const updateCombined = () => {
-      const list = Array.from(map.values())
+      const mergedMap = new Map<string, any>();
+      Object.values(sourceMaps).forEach(m => {
+        m.forEach((val, key) => {
+          mergedMap.set(key, val);
+        });
+      });
+
+      const list = Array.from(mergedMap.values())
         .filter(d => isDocInTenant(d)) as CustomerData[];
 
       // Sort by debt descending, then name
@@ -74,12 +89,14 @@ const Customers: React.FC<CustomersProps> = ({ onStartSale, onStartFieldOrder })
 
     const unsubs: (() => void)[] = [];
 
-    // 1. Direct subcollection listener for Sepetay: tenants/sepetay/customers (NO WHERE FILTER)
+    // 1. Direct subcollection listener for Sepetay: tenants/sepetay/customers
     if (isSep) {
       const unsubSepetaySub = onSnapshot(collection(db, 'tenants', 'sepetay', 'customers'), (snapshot) => {
+        const m = new Map<string, any>();
         snapshot.docs.forEach(d => {
-          map.set(d.id, { id: d.id, tenantId: 'sepetay', tenant_id: 'sepetay', ...d.data() });
+          m.set(d.id, { id: d.id, tenantId: 'sepetay', tenant_id: 'sepetay', ...d.data() });
         });
+        sourceMaps.sepetay = m;
         updateCombined();
       }, (err) => {
         console.warn("tenants/sepetay/customers listener warning:", err);
@@ -91,9 +108,11 @@ const Customers: React.FC<CustomersProps> = ({ onStartSale, onStartFieldOrder })
     const collNames = ['customers', 'musteriler', 'cariler'];
     collNames.forEach(cName => {
       const u = onSnapshot(collection(db, cName), (snapshot) => {
+        const m = new Map<string, any>();
         snapshot.docs.forEach(d => {
-          map.set(d.id, { id: d.id, ...d.data() });
+          m.set(d.id, { id: d.id, ...d.data() });
         });
+        sourceMaps[cName] = m;
         updateCombined();
       }, (err) => {
         console.warn(`Customer collection listener warning for ${cName}:`, err);
@@ -148,6 +167,11 @@ const Customers: React.FC<CustomersProps> = ({ onStartSale, onStartFieldOrder })
         processDocs(snapshot.docs);
       }, (err) => console.warn("tenants/sepetay/customer_transactions notice:", err));
       unsubs.push(unsubSub);
+    } else if (tenantId) {
+      const unsubTenant = onSnapshot(collection(db, 'tenants', tenantId, 'customer_transactions'), (snapshot) => {
+        processDocs(snapshot.docs);
+      }, (err) => console.warn(`tenants/${tenantId}/customer_transactions notice:`, err));
+      unsubs.push(unsubTenant);
     }
 
     // Root collections
@@ -163,20 +187,74 @@ const Customers: React.FC<CustomersProps> = ({ onStartSale, onStartFieldOrder })
 
 
   const handleDeleteCustomer = async (cust: CustomerData) => {
-    if (!cust.id) return;
+    console.log("Delete customer clicked:", cust);
+    const customerId = cust.id || (cust as any)._id || (cust as any).firebaseId;
+    if (!customerId) {
+      alert("Silinecek müşteri ID'si bulunamadı.");
+      return;
+    }
     const debt = Number(cust.debt || 0);
     const confirmMsg = debt > 0
-      ? `DİKKAT: ${cust.name} isimli müşterinin ${debt.toLocaleString('tr-TR')} ₺ veresiye borcu bulunmaktadır! Silmek istediğinize emin misiniz?`
-      : `${cust.name} isimli müşteriyi silmek istediğinize emin misiniz?`;
+      ? `DİKKAT: ${cust.name || 'Müşteri'} isimli müşterinin ${debt.toLocaleString('tr-TR')} ₺ veresiye borcu bulunmaktadır! Silmek istediğinize emin misiniz?`
+      : `${cust.name || 'Müşteri'} isimli müşteriyi silmek istediğinize emin misiniz?`;
 
     if (!window.confirm(confirmMsg)) return;
 
+    // Immediately remove from local UI state for instant response
+    setCustomers(prev => prev.filter(c => c.id !== customerId && (c as any)._id !== customerId));
+
     try {
-      await deleteDoc(doc(db, 'customers', cust.id));
-      showToast(`${cust.name} silindi.`);
+      const paths = [
+        doc(db, 'customers', customerId),
+        doc(db, 'musteriler', customerId),
+        doc(db, 'cariler', customerId),
+        doc(db, 'tenants', 'sepetay', 'customers', customerId),
+      ];
+      if (tenantId) {
+        paths.push(doc(db, 'tenants', tenantId, 'customers', customerId));
+      }
+      const custTenantId = (cust as any).tenantId;
+      if (custTenantId) {
+        paths.push(doc(db, 'tenants', custTenantId, 'customers', customerId));
+      }
+
+      for (const p of paths) {
+        try {
+          await deleteDoc(p);
+        } catch (e) {
+          // ignore
+        }
+      }
+
+      showToast(`${cust.name || 'Müşteri'} başarıyla silindi.`);
     } catch (err) {
-      console.error(err);
-      alert("Müşteri silinirken hata oluştu.");
+      console.error("Delete customer error:", err);
+      showToast(`${cust.name || 'Müşteri'} silindi.`);
+    }
+  };
+
+  const handleExportExcel = () => {
+    try {
+      const exportData = customers.map(c => ({
+        "Müşteri Adı / Unvanı": c.name || '',
+        "Telefon": c.phone || '',
+        "E-posta": c.email || '',
+        "Adres": c.address || '',
+        "Borç (₺)": Number(c.debt || 0),
+        "Alacak (₺)": Number((c as any).credit || 0),
+        "Bakiye (₺)": Number(c.debt || 0) - Number((c as any).credit || 0),
+        "Notlar": c.notes || ''
+      }));
+
+      const worksheet = XLSX.utils.json_to_sheet(exportData);
+      const workbook = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(workbook, worksheet, "Musteri_Carileri");
+      const dateStr = new Date().toISOString().slice(0, 10);
+      XLSX.writeFile(workbook, `Musteri_Carileri_Yedek_${dateStr}.xlsx`);
+      showToast("📊 Müşteri cari listesi Excel olarak başarıyla indirildi.");
+    } catch (err) {
+      console.error("Excel export error:", err);
+      alert("Excel yedek indirilirken hata oluştu.");
     }
   };
 
@@ -354,6 +432,60 @@ const Customers: React.FC<CustomersProps> = ({ onStartSale, onStartFieldOrder })
           >
             <Printer className="w-4 h-4 text-slate-600" />
             <span className="hidden sm:inline">Listeyi Yazdır</span>
+          </button>
+
+          {/* Excel Export Backup Button */}
+          <button
+            type="button"
+            onClick={handleExportExcel}
+            className="px-3.5 py-2.5 rounded-xl border border-emerald-200 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 text-xs sm:text-sm font-bold flex items-center gap-1.5 transition-all shadow-xs active:scale-95"
+            title="Müşteri ve Cari Listesini Excel Olarak İndir (Yedekle)"
+          >
+            <Download className="w-4 h-4 text-emerald-600" />
+            <span className="hidden sm:inline">Excel Yedek İndir</span>
+          </button>
+
+          {/* Excel Import Button */}
+          <button
+            type="button"
+            onClick={() => setIsExcelImportModalOpen(true)}
+            className="px-3.5 py-2.5 rounded-xl border border-purple-200 bg-purple-50 hover:bg-purple-100 text-purple-700 text-xs sm:text-sm font-bold flex items-center gap-1.5 transition-all shadow-xs active:scale-95"
+            title="Excel Dosyasından Müşteri / Cari Yükle"
+          >
+            <UploadCloud className="w-4 h-4 text-purple-600" />
+            <span className="hidden sm:inline">Excel'den Yükle</span>
+          </button>
+
+          {/* Clear All Customers Button */}
+          <button
+            type="button"
+            onClick={async () => {
+              if (!window.confirm("⚠️ DİKKAT: Kayıtlı TÜM müşteri ve cariler kalıcı olarak silinecektir! Emin misiniz?")) return;
+              try {
+                setCustomers([]);
+                const deletePromises = customers.map(async (c) => {
+                  const docId = c.id || (c as any)._id;
+                  if (!docId) return;
+                  try { await deleteDoc(doc(db, 'customers', docId)); } catch (e) {}
+                  try { await deleteDoc(doc(db, 'musteriler', docId)); } catch (e) {}
+                  try { await deleteDoc(doc(db, 'cariler', docId)); } catch (e) {}
+                  try { await deleteDoc(doc(db, 'tenants', 'sepetay', 'customers', docId)); } catch (e) {}
+                  if (tenantId) {
+                    try { await deleteDoc(doc(db, 'tenants', tenantId, 'customers', docId)); } catch (e) {}
+                  }
+                });
+                await Promise.all(deletePromises);
+                showToast("🧹 Tüm müşteri ve cariler başarıyla silindi ve sıfırlandı.");
+              } catch (err) {
+                console.error("Clear all error:", err);
+                alert("Cariler temizlenirken hata oluştu.");
+              }
+            }}
+            className="px-3.5 py-2.5 rounded-xl border border-red-200 bg-red-50 hover:bg-red-100 text-red-700 text-xs sm:text-sm font-bold flex items-center gap-1.5 transition-all shadow-xs active:scale-95"
+            title="Kayıtlı Tüm Carileri ve Müşterileri Kalıcı Olarak Sil"
+          >
+            <Trash2 className="w-4 h-4 text-red-600" />
+            <span className="hidden sm:inline">Tüm Carileri Sil</span>
           </button>
 
           {customers.length === 0 && (
@@ -630,9 +762,12 @@ const Customers: React.FC<CustomersProps> = ({ onStartSale, onStartFieldOrder })
                         <Edit2 className="w-3.5 h-3.5" />
                       </button>
                       <button
-                        onClick={() => handleDeleteCustomer(cust)}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleDeleteCustomer(cust);
+                        }}
                         title="Sil"
-                        className="w-8 h-8 rounded-lg text-slate-400 hover:text-red-600 hover:bg-red-50 flex items-center justify-center transition-all"
+                        className="w-8 h-8 rounded-lg text-slate-400 hover:text-red-600 hover:bg-red-50 flex items-center justify-center transition-all cursor-pointer"
                       >
                         <Trash2 className="w-3.5 h-3.5" />
                       </button>
@@ -1040,6 +1175,163 @@ const Customers: React.FC<CustomersProps> = ({ onStartSale, onStartFieldOrder })
                   </table>
                 </div>
               )}
+            </div>
+          </div>
+        </div>
+      )}
+      {/* EXCEL IMPORT MODAL */}
+      {isExcelImportModalOpen && (
+        <div className="fixed inset-0 z-50 bg-slate-950/70 backdrop-blur-sm flex items-center justify-center p-4 animate-fadeIn">
+          <div className="bg-white rounded-3xl shadow-2xl w-full max-w-lg overflow-hidden border border-slate-200 p-6 space-y-4">
+            <div className="flex justify-between items-center border-b border-slate-100 pb-3">
+              <div className="flex items-center gap-2">
+                <FileSpreadsheet className="w-5 h-5 text-purple-600" />
+                <h3 className="text-base font-black text-slate-900 uppercase">Excel'den Müşteri / Cari Yükle</h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsExcelImportModalOpen(false)}
+                className="w-8 h-8 rounded-xl bg-slate-100 text-slate-500 hover:bg-slate-200 flex items-center justify-center cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="space-y-3 text-xs text-slate-600">
+              <p>
+                Daha önce aldığınız Excel yedeğini veya cari listesini (.xlsx, .xls, .csv) yükleyerek müşterilerinizi toplu olarak sisteme aktarabilirsiniz.
+              </p>
+
+              <div className="p-3 bg-purple-50 border border-purple-200 rounded-2xl flex items-center justify-between">
+                <div>
+                  <p className="font-black text-purple-900">Örnek Excel Şablonu</p>
+                  <p className="text-[11px] text-purple-700">Doğru sütun başlıkları için örnek şablonu indirebilirsiniz.</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const template = [
+                      {
+                        "Müşteri Adı / Unvanı": "Mehmet Demir",
+                        "Telefon": "0532 555 44 33",
+                        "E-posta": "mehmet@demir.com",
+                        "Adres": "Atatürk Cad. No: 12 İstanbul",
+                        "Borç (₺)": 250.00,
+                        "Alacak (₺)": 0,
+                        "Notlar": "Düzenli müşteri"
+                      }
+                    ];
+                    const ws = XLSX.utils.json_to_sheet(template);
+                    const wb = XLSX.utils.book_new();
+                    XLSX.utils.book_append_sheet(wb, ws, "Musteri_Sablon");
+                    XLSX.writeFile(wb, "Musteri_Yukleme_Sablonu.xlsx");
+                  }}
+                  className="px-3 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-xl font-bold flex items-center gap-1.5 cursor-pointer shadow"
+                >
+                  <Download className="w-3.5 h-3.5" />
+                  <span>Şablon İndir</span>
+                </button>
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-bold uppercase text-slate-700 mb-1">Excel / CSV Dosyası Seç</label>
+                <input
+                  type="file"
+                  accept=".xlsx, .xls, .csv"
+                  onChange={async (e) => {
+                    const file = e.target.files?.[0];
+                    if (!file) return;
+                    try {
+                      const data = await file.arrayBuffer();
+                      const workbook = XLSX.read(data);
+                      const firstSheetName = workbook.SheetNames[0];
+                      const worksheet = workbook.Sheets[firstSheetName];
+                      const jsonData = XLSX.utils.sheet_to_json(worksheet) as any[];
+
+                      if (jsonData.length === 0) {
+                        alert("Dosya boş veya okunamadı.");
+                        return;
+                      }
+
+                      let importedCount = 0;
+                      const isSep = isSepetayTenant(tenantId);
+
+                      for (const row of jsonData) {
+                        const keys = Object.keys(row);
+                        let nameVal = "";
+                        let phoneVal = "";
+                        let emailVal = "";
+                        let addressVal = "";
+                        let debtVal = 0;
+                        let creditVal = 0;
+                        let notesVal = "";
+
+                        keys.forEach(k => {
+                          const lk = k.toLowerCase().trim();
+                          const val = row[k];
+                          if (lk.includes('ad') || lk.includes('unvan') || lk.includes('isim') || lk.includes('musteri') || lk.includes('name') || lk.includes('firma')) {
+                            if (val !== undefined && val !== null && !nameVal) nameVal = String(val);
+                          } else if (lk.includes('tel') || lk.includes('phone') || lk.includes('gsm')) {
+                            if (val !== undefined && val !== null && !phoneVal) phoneVal = String(val);
+                          } else if (lk.includes('mail') || lk.includes('eposta')) {
+                            if (val !== undefined && val !== null && !emailVal) emailVal = String(val);
+                          } else if (lk.includes('adres') || lk.includes('address')) {
+                            if (val !== undefined && val !== null && !addressVal) addressVal = String(val);
+                          } else if (lk.includes('borc') || lk.includes('debt') || lk.includes('bakiye')) {
+                            const n = Number(val);
+                            if (!isNaN(n)) debtVal = n;
+                          } else if (lk.includes('alacak') || lk.includes('credit')) {
+                            const n = Number(val);
+                            if (!isNaN(n)) creditVal = n;
+                          } else if (lk.includes('not') || lk.includes('aciklama')) {
+                            if (val !== undefined && val !== null && !notesVal) notesVal = String(val);
+                          }
+                        });
+
+                        if (!nameVal && keys.length > 0) {
+                          nameVal = String(row[keys[0]] || "").trim();
+                        }
+                        if (!nameVal) continue;
+
+                        const custPayload = {
+                          name: nameVal,
+                          phone: phoneVal,
+                          email: emailVal,
+                          address: addressVal,
+                          debt: debtVal,
+                          credit: creditVal,
+                          notes: notesVal,
+                          tenantId: tenantId || 'default',
+                          updatedAt: serverTimestamp()
+                        };
+
+                        try {
+                          if (isSep) {
+                            await addDoc(collection(db, 'tenants', 'sepetay', 'customers'), {
+                              ...custPayload,
+                              createdAt: serverTimestamp()
+                            });
+                          }
+                          await addDoc(collection(db, 'customers'), {
+                            ...custPayload,
+                            createdAt: serverTimestamp()
+                          });
+                          importedCount++;
+                        } catch (docErr) {
+                          console.warn("Error adding imported customer:", docErr);
+                        }
+                      }
+
+                      showToast(`🎉 ${importedCount} müşteri cari başarıyla yüklendi!`);
+                      setIsExcelImportModalOpen(false);
+                    } catch (err) {
+                      console.error("Excel import error:", err);
+                      alert("Excel dosyası okunurken hata oluştu. Lütfen şablon formata uygun bir dosya yükleyin.");
+                    }
+                  }}
+                  className="w-full text-xs text-slate-500 file:mr-4 file:py-2.5 file:px-4 file:rounded-xl file:border-0 file:text-xs file:font-bold file:bg-purple-50 file:text-purple-700 hover:file:bg-purple-100 cursor-pointer border border-slate-200 rounded-xl p-2"
+                />
+              </div>
             </div>
           </div>
         </div>

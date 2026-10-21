@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { 
   collection, query, onSnapshot, addDoc, 
-  updateDoc, deleteDoc, doc, serverTimestamp 
+  updateDoc, deleteDoc, doc, serverTimestamp, setDoc 
 } from 'firebase/firestore';
 import * as XLSX from 'xlsx';
 import { db } from '../lib/firebase';
@@ -10,7 +10,7 @@ import {
   FileSpreadsheet, Download, ScanBarcode, CheckCircle2, 
   Printer, Package, Layers, DollarSign, RotateCcw, Tag, Image as ImageIcon,
   ChevronDown, ChevronUp, Sparkles, Shirt, Palette, Scissors, Coins, Check, ArrowRight,
-  Globe
+  Globe, Warehouse, Store
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { cn } from '../lib/utils';
@@ -23,6 +23,7 @@ import { isTenantFeatureEnabled, ProductVariant, isSepetayTenant } from '../lib/
 import { syncStockToMarketplaces } from '../lib/marketplaceSync';
 import { lookupGlobalProduct, saveToGlobalCatalog, GlobalProduct } from '../lib/global-catalog';
 import { GlobalProductQuickRegisterModal, QuickRegisteredProductData } from './common/GlobalProductQuickRegisterModal';
+import { getProductMagazaStok, getProductDepoStok, getProductToplamStok } from './WarehouseManagement';
 
 const Inventory: React.FC = () => {
   const [products, setProducts] = useState<any[]>([]);
@@ -200,6 +201,8 @@ const Inventory: React.FC = () => {
     price: string;
     purchasePrice: string;
     stock: string;
+    magazaStok: string;
+    depoStok: string;
     minStock: string;
     category: string;
     imageUrl: string;
@@ -211,6 +214,8 @@ const Inventory: React.FC = () => {
     price: '',
     purchasePrice: '',
     stock: '',
+    magazaStok: '',
+    depoStok: '',
     minStock: '',
     category: '',
     imageUrl: '',
@@ -337,9 +342,16 @@ const Inventory: React.FC = () => {
     const cleanStock = parseInt(formData.stock, 10) || 0;
     const cleanMinStock = parseInt(formData.minStock, 10) || 5;
 
+    // Location stock synchronization (Mağaza vs Depo)
+    const cleanMagaza = formData.magazaStok !== '' ? (parseInt(formData.magazaStok, 10) || 0) : cleanStock;
+    const cleanDepo = formData.depoStok !== '' ? (parseInt(formData.depoStok, 10) || 0) : 0;
+    const totalCalcStock = cleanMagaza + cleanDepo;
+
     const totalVariantStock = formData.hasVariants && formData.variants.length > 0
       ? formData.variants.reduce((acc, v) => acc + (Number(v.stock) || 0), 0)
-      : cleanStock;
+      : totalCalcStock;
+
+    const isSep = isSepetayTenant(tenantId);
 
     const data = {
       name: formData.name.trim(),
@@ -347,6 +359,13 @@ const Inventory: React.FC = () => {
       price: cleanPrice,
       purchasePrice: cleanPurchasePrice,
       stock: totalVariantStock,
+      stok: totalVariantStock,
+      magazaStok: cleanMagaza,
+      magazaStoku: cleanMagaza,
+      depoStok: cleanDepo,
+      depoStoku: cleanDepo,
+      stokDepo: cleanDepo,
+      warehouseStock: cleanDepo,
       minStock: cleanMinStock,
       category: formData.category.trim() || 'Genel',
       imageUrl: formData.imageUrl.trim() || '',
@@ -358,13 +377,22 @@ const Inventory: React.FC = () => {
     try {
       let savedId = editingProduct ? editingProduct.id : '';
       if (editingProduct) {
-        await updateDoc(doc(db, 'products', editingProduct.id), data);
+        await setDoc(doc(db, 'products', editingProduct.id), withTenant(data), { merge: true }).catch(() => {});
+        if (isSep) {
+          await setDoc(doc(db, 'tenants', 'sepetay', 'products', editingProduct.id), withTenant(data), { merge: true }).catch(() => {});
+        }
         showToast(`"${formData.name}" ürünü güncellendi.`);
       } else {
         const docRef = await addDoc(collection(db, 'products'), withTenant({
           ...data,
           createdAt: serverTimestamp(),
         }));
+        if (isSep) {
+          await setDoc(doc(db, 'tenants', 'sepetay', 'products', docRef.id), withTenant({
+            ...data,
+            createdAt: serverTimestamp(),
+          })).catch(() => {});
+        }
         savedId = docRef.id;
         showToast(`"${formData.name}" yeni ürün olarak eklendi.`);
       }
@@ -398,6 +426,8 @@ const Inventory: React.FC = () => {
         price: '',
         purchasePrice: '',
         stock: '',
+        magazaStok: '',
+        depoStok: '',
         minStock: '',
         category: '',
         imageUrl: '',
@@ -412,19 +442,27 @@ const Inventory: React.FC = () => {
 
   const deleteProduct = async (id: string) => {
     if (confirm('Bu ürünü silmek istediğinize emin misiniz?')) {
-      await deleteDoc(doc(db, 'products', id));
+      const isSep = isSepetayTenant(tenantId);
+      await deleteDoc(doc(db, 'products', id)).catch(() => {});
+      if (isSep) {
+        await deleteDoc(doc(db, 'tenants', 'sepetay', 'products', id)).catch(() => {});
+      }
       showToast('Ürün başarıyla silindi.');
     }
   };
 
   const openEdit = (product: any) => {
     setEditingProduct(product);
+    const magazaVal = product.magazaStok ?? product.magazaStoku ?? product.stock ?? product.stok ?? 0;
+    const depoVal = product.depoStok ?? product.depoStoku ?? product.stokDepo ?? product.warehouseStock ?? 0;
     setFormData({
       name: product.name || '',
       barcode: product.barcode || '',
       price: (product.price ?? product.satisFiyati ?? product.fiyat ?? 0).toString(),
       purchasePrice: (product.purchasePrice ?? product.alisFiyati ?? 0).toString(),
       stock: (product.stock ?? product.miktar ?? product.adet ?? 0).toString(),
+      magazaStok: magazaVal.toString(),
+      depoStok: depoVal.toString(),
       minStock: (product.minStock ?? 5).toString(),
       category: product.category || 'Genel',
       imageUrl: product.imageUrl || '',
@@ -804,16 +842,18 @@ const Inventory: React.FC = () => {
                 <th className="px-6 py-4">Ürün Bilgisi / Barkod</th>
                 <th className="px-6 py-4">Kategori</th>
                 <th className="px-6 py-4 text-right">Satış Fiyatı</th>
-                <th className="px-6 py-4">Mevcut Stok</th>
+                <th className="px-6 py-4">Stok Dağılımı (Mağaza / Depo / Toplam)</th>
                 <th className="px-6 py-4 text-right">İşlemler</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
               {filteredProducts.map(product => {
                 const price = Number(product.price ?? product.satisFiyati ?? product.fiyat ?? 0) || 0;
-                const stock = Number(product.stock ?? product.miktar ?? product.adet ?? 0) || 0;
+                const magazaStok = getProductMagazaStok(product);
+                const depoStok = getProductDepoStok(product);
+                const toplamStok = getProductToplamStok(product);
                 const minStock = Number(product.minStock ?? 5);
-                const isCritical = stock <= minStock;
+                const isCritical = toplamStok <= minStock;
                 const hasVariants = Boolean(product.hasVariants || (product.variants && product.variants.length > 0));
                 const isExpanded = Boolean(expandedProductVariants[product.id]);
 
@@ -869,12 +909,24 @@ const Inventory: React.FC = () => {
                         )}
                       </td>
                       <td className="px-6 py-4">
-                        <div className="flex items-center gap-2">
-                          <span className={`text-sm font-black ${isCritical ? 'text-red-600' : 'text-emerald-700'}`}>
-                            {stock} Adet
-                          </span>
+                        <div className="space-y-1">
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-blue-50 text-blue-800 text-[11px] font-bold border border-blue-200">
+                              <Store className="w-3 h-3 text-blue-600" />
+                              <span>Mağaza: {magazaStok}</span>
+                            </span>
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-amber-50 text-amber-800 text-[11px] font-bold border border-amber-200">
+                              <Warehouse className="w-3 h-3 text-amber-600" />
+                              <span>Depo: {depoStok}</span>
+                            </span>
+                            <span className={`inline-flex items-center px-2 py-0.5 rounded-md text-[11px] font-black ${
+                              isCritical ? 'bg-red-100 text-red-700 border border-red-200' : 'bg-slate-100 text-slate-900'
+                            }`}>
+                              Toplam: {toplamStok} Adet
+                            </span>
+                          </div>
                           {isCritical && (
-                            <span className="inline-flex items-center gap-1 text-[10px] bg-red-100 text-red-700 px-2 py-0.5 rounded-full font-bold">
+                            <span className="inline-flex items-center gap-1 text-[10px] text-red-600 font-bold">
                               <AlertCircle className="w-3 h-3" />
                               Kritik (Min: {minStock})
                             </span>
@@ -978,9 +1030,11 @@ const Inventory: React.FC = () => {
         <div className="lg:hidden divide-y divide-slate-100">
           {filteredProducts.map(product => {
             const price = Number(product.price ?? product.satisFiyati ?? product.fiyat ?? 0) || 0;
-            const stock = Number(product.stock ?? product.miktar ?? product.adet ?? 0) || 0;
+            const magazaStok = getProductMagazaStok(product);
+            const depoStok = getProductDepoStok(product);
+            const toplamStok = getProductToplamStok(product);
             const minStock = Number(product.minStock ?? 5);
-            const isCritical = stock <= minStock;
+            const isCritical = toplamStok <= minStock;
             const hasVariants = Boolean(product.hasVariants || (product.variants && product.variants.length > 0));
             const isExpanded = Boolean(expandedProductVariants[product.id]);
 
@@ -1004,15 +1058,23 @@ const Inventory: React.FC = () => {
                         <span className="text-slate-300">·</span>
                         <span className="text-slate-600">{product.category || 'Genel'}</span>
                       </div>
-                      <div className="flex items-center gap-2.5 mt-2">
+                      <div className="flex items-center gap-2 mt-2">
                         <span className="text-slate-900 font-black text-sm">
                           {price.toLocaleString('tr-TR', { minimumFractionDigits: 2 })} ₺
                         </span>
+                      </div>
+                      <div className="flex items-center gap-1.5 flex-wrap mt-1.5">
+                        <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-blue-50 text-blue-800 border border-blue-200">
+                          Mağaza: {magazaStok}
+                        </span>
+                        <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-amber-50 text-amber-800 border border-amber-200">
+                          Depo: {depoStok}
+                        </span>
                         <span className={cn(
-                          "text-[11px] font-bold px-2 py-0.5 rounded-lg",
-                          isCritical ? "bg-red-100 text-red-700" : "bg-emerald-100 text-emerald-800"
+                          "text-[10px] font-black px-2 py-0.5 rounded-md",
+                          isCritical ? "bg-red-100 text-red-700" : "bg-slate-100 text-slate-800"
                         )}>
-                          {stock} Adet {isCritical ? '(Kritik)' : ''}
+                          Toplam: {toplamStok} Adet {isCritical ? '(Kritik)' : ''}
                         </span>
                       </div>
                     </div>
@@ -1199,25 +1261,65 @@ const Inventory: React.FC = () => {
                 </div>
 
                 <div>
-                  <label className="block text-[11px] font-bold text-slate-700 uppercase mb-1">
-                    {formData.hasVariants && formData.variants.length > 0 ? 'Genel Stok (Otomatik)' : 'Mevcut Stok *'}
+                  <label className="block text-[11px] font-bold text-slate-700 uppercase mb-1 flex items-center justify-between">
+                    <span>🏬 Mağaza Stoku (Adet)</span>
+                    <span className="text-[10px] text-slate-400 font-normal lowercase">(isteğe bağlı, varsayılan: 0)</span>
                   </label>
                   <input 
-                    required 
                     type="number" 
+                    min="0"
                     placeholder="0" 
                     disabled={formData.hasVariants && formData.variants.length > 0}
                     value={formData.hasVariants && formData.variants.length > 0 
                       ? formData.variants.reduce((acc, v) => acc + (Number(v.stock) || 0), 0)
-                      : formData.stock
+                      : (formData.magazaStok !== '' ? formData.magazaStok : formData.stock)
                     } 
-                    onChange={e => setFormData({...formData, stock: e.target.value})} 
+                    onChange={e => {
+                      const val = e.target.value;
+                      setFormData(prev => ({
+                        ...prev, 
+                        magazaStok: val,
+                        stock: val
+                      }));
+                    }} 
                     className={`w-full px-3.5 py-2.5 rounded-xl text-xs sm:text-sm font-bold focus:outline-none focus:ring-2 focus:ring-blue-500 ${
                       formData.hasVariants && formData.variants.length > 0 
                         ? 'bg-indigo-50 border border-indigo-200 text-indigo-700 cursor-not-allowed'
-                        : 'bg-slate-50 border border-slate-200 text-blue-600'
+                        : 'bg-blue-50/60 border border-blue-200 text-blue-900'
                     }`}
                   />
+                </div>
+              </div>
+
+              {/* Depo Yönetimi & Çoklu Lokasyon Stok Ayrımı */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 bg-slate-50 p-3.5 rounded-2xl border border-slate-200/80">
+                <div>
+                  <label className="block text-[11px] font-bold text-indigo-900 uppercase mb-1 flex items-center gap-1.5">
+                    <Warehouse className="w-3.5 h-3.5 text-indigo-600" />
+                    <span>📦 Depo Stoku (Adet)</span>
+                  </label>
+                  <input 
+                    type="number" 
+                    min="0"
+                    placeholder="0" 
+                    value={formData.depoStok} 
+                    onChange={e => setFormData(prev => ({ ...prev, depoStok: e.target.value }))} 
+                    className="w-full px-3.5 py-2.5 bg-white border border-indigo-200 rounded-xl text-xs sm:text-sm font-bold text-indigo-900 focus:outline-none focus:ring-2 focus:ring-indigo-500" 
+                  />
+                  <p className="text-[10px] text-slate-400 mt-1">Depo sekmesinde görüntülenecek ve transfere hazır stok</p>
+                </div>
+
+                <div>
+                  <label className="block text-[11px] font-bold text-slate-700 uppercase mb-1">
+                    Toplam Stok (Mağaza + Depo)
+                  </label>
+                  <div className="px-3.5 py-2.5 bg-white border border-slate-200 rounded-xl text-xs sm:text-sm font-black text-slate-900 flex items-center justify-between">
+                    <span className="text-slate-500 font-semibold text-xs">Hesaplanan Toplam:</span>
+                    <span className="text-sm font-black text-emerald-700 bg-emerald-50 px-2.5 py-0.5 rounded-lg border border-emerald-200">
+                      {((parseInt(formData.magazaStok || formData.stock || '0', 10) || 0) + (parseInt(formData.depoStok || '0', 10) || 0))} Adet
+                    </span>
+                  </div>
+                  <p className="text-[10px] text-emerald-600 font-medium mt-1">Stok ve Kasa ekranlarında anında güncellenir</p>
                 </div>
               </div>
 

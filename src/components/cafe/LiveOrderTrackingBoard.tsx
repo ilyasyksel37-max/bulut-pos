@@ -579,20 +579,9 @@ export const LiveOrderTrackingBoard: React.FC<LiveOrderTrackingBoardProps> = ({
                       )}
 
                       {isReady && (
-                        <div className="flex-1 flex gap-2 items-center">
-                          <span className="flex-1 text-center py-2 px-2 bg-emerald-100 text-emerald-800 font-black text-xs rounded-xl border border-emerald-300 flex items-center justify-center gap-1">
-                            <Bell className="w-3.5 h-3.5 text-emerald-600 animate-bounce" />
-                            <span>Garson Bekleniyor</span>
-                          </span>
-                          <button
-                            type="button"
-                            onClick={() => handleDeliver(order)}
-                            className="py-2.5 px-3 bg-emerald-700 hover:bg-emerald-800 text-white font-black text-xs rounded-xl shadow-md transition-all cursor-pointer flex items-center gap-1"
-                            title="Doğrudan Masaya Verildi Olarak İşaretle"
-                          >
-                            <Check className="w-3.5 h-3.5" />
-                            <span>Verildi</span>
-                          </button>
+                        <div className="flex-1 py-2.5 px-3 bg-emerald-50 text-emerald-800 font-black text-xs rounded-xl border border-emerald-300 flex items-center justify-center gap-1.5 shadow-sm">
+                          <Bell className="w-4 h-4 text-emerald-600 animate-bounce" />
+                          <span>🔔 Garsona Bildirildi (Servis Bekleniyor)</span>
                         </div>
                       )}
 

@@ -73,6 +73,15 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const activeTrackRef = useRef<MediaStreamTrack | null>(null);
 
+  const onScanRef = useRef(onScan);
+  const onCloseRef = useRef(onClose);
+  const onAddNewProductRef = useRef(onAddNewProduct);
+  useEffect(() => {
+    onScanRef.current = onScan;
+    onCloseRef.current = onClose;
+    onAddNewProductRef.current = onAddNewProduct;
+  });
+
   // Initialize CodeReader with retail-specific formats and high-performance hints
   const getCodeReader = useCallback(() => {
     if (!codeReaderRef.current) {
@@ -169,12 +178,12 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
 
     playBeep();
     triggerHaptic();
-    onScan(cleanText);
+    onScanRef.current(cleanText);
 
     if (!isContinuous) {
-      onClose();
+      onCloseRef.current();
     }
-  }, [isContinuous, onScan, onClose, playBeep, triggerHaptic]);
+  }, [isContinuous, playBeep, triggerHaptic]);
 
   // Frame processing loop focusing on the target Viewfinder Region
   const runScanningLoop = useCallback(() => {
@@ -319,7 +328,26 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
     }
   }, [zoomLevel]);
 
-  // Robust multi-tier camera startup guaranteeing compatibility with iOS Safari, Chrome, and Android
+  // Refresh and enumerate video input devices
+  const refreshCameraDevices = useCallback(async () => {
+    if (typeof navigator === 'undefined' || !navigator.mediaDevices?.enumerateDevices) return;
+    try {
+      const allDevs = await navigator.mediaDevices.enumerateDevices();
+      const videoDevs = allDevs
+        .filter(d => d.kind === 'videoinput')
+        .map((d, index) => ({
+          id: d.deviceId,
+          label: d.label || (index === 0 ? 'Varsayılan Web Kamera' : `Harici Kamera ${index + 1}`)
+        }));
+      if (videoDevs.length > 0) {
+        setCameras(videoDevs);
+      }
+    } catch (e) {
+      console.warn("Camera device enumeration notice:", e);
+    }
+  }, []);
+
+  // Robust multi-tier camera startup guaranteeing compatibility with iOS Safari, Chrome, Android, and Desktop USB Webcams
   const startCamera = useCallback(async (cameraId?: string, res?: '720p' | '1080p' | '4k') => {
     setErrorMessage(null);
     setScannerReady(false);
@@ -336,10 +364,9 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
       targetHeight = 2160;
     }
 
-    // Robust multi-tier camera startup guaranteeing compatibility with iOS Safari, Chrome, and Android
     if (typeof navigator === 'undefined' || !navigator.mediaDevices || typeof navigator.mediaDevices.getUserMedia !== 'function') {
       console.warn("Camera mediaDevices API is not supported in this browser or environment.");
-      setErrorMessage("Bu cihazda veya tarayıcıda kamera erişimi desteklenmiyor. Aşağıdaki 'Elle Barkod Yaz' veya 'Fotoğraftan Oku' seçeneğini kullanabilirsiniz.");
+      setErrorMessage("Bu tarayıcı veya cihaz ortamında kamera API'si desteklenmiyor. Aşağıdaki 'Elle Barkod Yaz' veya 'Fotoğraftan Oku' seçeneğini kullanabilirsiniz.");
       setShowManualInput(true);
       return;
     }
@@ -347,11 +374,11 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
     let stream: MediaStream | null = null;
     const selectedId = cameraId || selectedCameraId;
 
-    // TIER 1: Standard environment request with ideal resolution
+    // TIER 1: Standard request with ideal deviceId or environment facingMode + ideal resolution
     try {
       const videoConstraints: MediaTrackConstraints = {
+        deviceId: selectedId ? { ideal: selectedId } : undefined,
         facingMode: selectedId ? undefined : { ideal: 'environment' },
-        deviceId: selectedId ? { exact: selectedId } : undefined,
         width: { ideal: targetWidth },
         height: { ideal: targetHeight }
       };
@@ -360,20 +387,22 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
         video: videoConstraints
       });
     } catch (tier1Err) {
-      console.warn("Tier 1 camera start failed, attempting Tier 2 (basic environment):", tier1Err);
+      console.warn("Tier 1 camera start failed, attempting Tier 2:", tier1Err);
 
-      // TIER 2: Basic environment camera without specific resolution constraints (fixes mobile Safari OverconstrainedError)
+      // TIER 2: Basic request without strict resolution constraints (handles mobile Safari & desktop webcams)
       try {
+        const videoConstraintsTier2: MediaTrackConstraints = selectedId
+          ? { deviceId: { ideal: selectedId } }
+          : { facingMode: { ideal: 'environment' } };
+
         stream = await navigator.mediaDevices.getUserMedia({
           audio: false,
-          video: {
-            facingMode: { ideal: 'environment' }
-          }
+          video: videoConstraintsTier2
         });
       } catch (tier2Err) {
-        console.warn("Tier 2 camera start failed, attempting Tier 3 (any camera):", tier2Err);
+        console.warn("Tier 2 camera start failed, attempting Tier 3 (universal camera fallback):", tier2Err);
 
-        // TIER 3: Universal fallback to any accessible video device
+        // TIER 3: Universal fallback to any accessible video device (USB Webcam / Built-in Camera)
         try {
           stream = await navigator.mediaDevices.getUserMedia({
             audio: false,
@@ -382,12 +411,14 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
         } catch (tier3Err: any) {
           console.warn("Camera access not available in current environment:", tier3Err?.message || tier3Err);
           const msg = (tier3Err?.name || '') + ' ' + (tier3Err?.message || String(tier3Err));
-          if (msg.includes('Permission') || msg.includes('NotAllowed') || msg.includes('denied')) {
-            setErrorMessage("Kamera izni verilmedi. Tarayıcı izinlerinden onay verebilir veya aşağıdaki 'Elle Barkod Yaz' alanını kullanabilirsiniz.");
+          if (msg.includes('Permission') || msg.includes('NotAllowed') || msg.includes('denied') || msg.includes('SecurityError')) {
+            setErrorMessage("Kamera izni verilmedi veya tarayıcı tarafından engellendi. Tarayıcınızın adres çubuğundaki kilit simgesine tıklayarak Kamera iznini 'İzin Ver' olarak onaylayın.");
           } else if (msg.includes('NotFound') || msg.includes('DevicesNotFoundError')) {
-            setErrorMessage("Cihazınızda bağlı bir kamera bulunamadı. Lütfen aşağıdaki 'Elle Barkod Yaz' veya 'Fotoğraftan Oku' seçeneğini kullanın.");
+            setErrorMessage("Cihazınızda bağlı bir kamera veya web kamerası algılanamadı. Lütfen USB kameranızın takılı olduğundan emin olun veya aşağıdaki 'Elle Barkod Yaz' alanını kullanın.");
+          } else if (msg.includes('NotReadable') || msg.includes('TrackStartError')) {
+            setErrorMessage("Kamera başka bir uygulama (Zoom, Teams, başka bir sekme vb.) tarafından kullanılıyor olabilir. Lütfen diğer uygulamaları kapatıp tekrar deneyin.");
           } else {
-            setErrorMessage("Kamera başlatılamadı veya bu ortamda erişilemiyor. Lütfen aşağıdaki 'Elle Barkod Yaz' veya 'Fotoğraftan Oku' seçeneğini kullanın.");
+            setErrorMessage("Kamera başlatılamadı (" + (tier3Err?.message || 'Bağlantı hatası') + "). Lütfen kamera iznini onaylayın veya harici web kamerası seçin.");
           }
           setShowManualInput(true);
           return;
@@ -396,7 +427,7 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
     }
 
     if (!stream) {
-      setErrorMessage("Kamera akışı alınamadı. Lütfen 'Elle Barkod Yaz' alanını kullanın.");
+      setErrorMessage("Kamera akışı alınamadı. Lütfen kamera iznini kontrol edin veya 'Elle Barkod Yaz' alanını kullanın.");
       setShowManualInput(true);
       return;
     }
@@ -431,20 +462,8 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
         await applySafeAdvancedConstraints(track);
       }
 
-      // Populate available cameras list after permission is granted
-      if (cameras.length === 0 && navigator.mediaDevices?.enumerateDevices) {
-        try {
-          const allDevs = await navigator.mediaDevices.enumerateDevices();
-          const videoDevs = allDevs
-            .filter(d => d.kind === 'videoinput')
-            .map(d => ({ id: d.deviceId, label: d.label || `Kamera ${d.deviceId.slice(0, 5)}` }));
-          if (videoDevs.length > 0) {
-            setCameras(videoDevs);
-          }
-        } catch {
-          // ignore enumeration error
-        }
-      }
+      // Re-populate and update available cameras list after permission is granted
+      refreshCameraDevices();
 
       setScannerReady(true);
       isScanningRef.current = true;
@@ -558,7 +577,7 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
     if (isOpen) {
       timer = setTimeout(() => {
         startCamera(selectedCameraId, activeResolution);
-      }, 80);
+      }, 100);
     } else {
       stopCamera();
       setLastScanned(null);
@@ -570,7 +589,7 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
       if (timer) clearTimeout(timer);
       stopCamera();
     };
-  }, [isOpen, startCamera, stopCamera, selectedCameraId, activeResolution]);
+  }, [isOpen]);
 
   if (!isOpen) return null;
 
@@ -929,15 +948,15 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
 
           {/* Primary Controls Row */}
           <div className="flex items-center justify-between gap-2 flex-wrap">
-            {cameras.length > 1 && (
-              <div className="flex items-center gap-1.5 flex-1 min-w-[130px] max-w-[190px]">
+            {cameras.length > 0 && (
+              <div className="flex items-center gap-1.5 flex-1 min-w-[130px] max-w-[210px]">
                 <SwitchCamera className="w-4 h-4 text-slate-400 shrink-0" />
                 <select
                   value={selectedCameraId}
                   onChange={handleCameraChange}
                   className="w-full bg-slate-800 text-slate-200 border border-slate-700 rounded-xl px-2.5 py-1.5 text-xs truncate focus:ring-2 focus:ring-indigo-500 focus:outline-none font-medium cursor-pointer"
                 >
-                  <option value="">Varsayılan (Arka Kamera)</option>
+                  <option value="">Varsayılan Kamera</option>
                   {cameras.map((c) => (
                     <option key={c.id} value={c.id}>
                       {c.label || `Kamera ${c.id.substring(0, 5)}...`}

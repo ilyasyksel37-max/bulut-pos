@@ -290,7 +290,7 @@ export const CafeRestaurantModule: React.FC<CafeRestaurantModuleProps> = ({ show
     });
   };
 
-  // Active popup / alert for ready orders from kitchen
+  // Active popup / alert for ready orders from kitchen (YALNIZCA Garson ekranı için)
   const [activeReadyAlert, setActiveReadyAlert] = useState<{
     id: string;
     tableName: string;
@@ -300,9 +300,20 @@ export const CafeRestaurantModule: React.FC<CafeRestaurantModuleProps> = ({ show
     time?: string;
   } | null>(null);
 
-  // Ref to track known ready order IDs
+  // Ref to track known ready order IDs and latest user role
   const knownReadyIdsRef = useRef<Set<string>>(new Set());
   const isFirstLoadRef = useRef(true);
+  const userRoleRef = useRef(userRole);
+  userRoleRef.current = userRole;
+  const activeSubTabRef = useRef(activeSubTab);
+  activeSubTabRef.current = activeSubTab;
+
+  // Clear ready alert immediately if kitchen screen or role is active
+  useEffect(() => {
+    if (userRole === 'mutfak' || activeSubTab === 'kds') {
+      setActiveReadyAlert(null);
+    }
+  }, [userRole, activeSubTab]);
 
   // Firestore Realtime Sync: Kitchen Orders (KDS) & Waiter Alert
   const [kitchenOrders, setKitchenOrders] = useState<any[]>([]);
@@ -316,30 +327,35 @@ export const CafeRestaurantModule: React.FC<CafeRestaurantModuleProps> = ({ show
       const currentReadyIds = new Set(currentReadyOrders.map((o: any) => o.id));
 
       if (isFirstLoadRef.current) {
-        // First snapshot: register existing ready orders silently
+        // First snapshot: register existing ready orders silently without blocking the screen
         knownReadyIdsRef.current = currentReadyIds;
         isFirstLoadRef.current = false;
-        if (currentReadyOrders.length > 0) {
-          setActiveReadyAlert(currentReadyOrders[0] as any);
-        }
       } else {
         // Subsequent snapshots: find newly ready orders
         const newlyReady: any[] = currentReadyOrders.filter((o: any) => !knownReadyIdsRef.current.has(o.id));
         if (newlyReady.length > 0) {
           const newest = newlyReady[newlyReady.length - 1];
-          setActiveReadyAlert(newest as any);
+          const currentRole = userRoleRef.current;
+          const currentTab = activeSubTabRef.current;
 
-          // Play Audio chime
-          if (soundEnabled) {
-            playOrderReadySound();
+          // UYARI SADECE GARSONA GİTSİN! Mutfakta sayfa düzenini bozmasın ve mutfak personeline çalmasın.
+          const isTargetWaiter = currentRole === 'garson' || (currentRole === 'admin' && currentTab !== 'kds');
+
+          if (isTargetWaiter) {
+            setActiveReadyAlert(newest as any);
+
+            // Play Audio chime for waiter
+            if (soundEnabled) {
+              playOrderReadySound();
+            }
+
+            // Vibrate on mobile
+            if (typeof navigator !== 'undefined' && navigator.vibrate) {
+              try { navigator.vibrate([200, 100, 200, 100, 300]); } catch (e) {}
+            }
+
+            displayToast(`🔔 ${(newest as any).tableName} siparişi mutfakta HAZIR! Lütfen servise çıkarın.`);
           }
-
-          // Vibrate on mobile
-          if (typeof navigator !== 'undefined' && navigator.vibrate) {
-            try { navigator.vibrate([200, 100, 200, 100, 300]); } catch (e) {}
-          }
-
-          displayToast(`🔔 ${(newest as any).tableName} siparişi mutfakta HAZIR! Lütfen servise çıkarın.`);
         }
         knownReadyIdsRef.current = currentReadyIds;
       }
@@ -975,9 +991,9 @@ export const CafeRestaurantModule: React.FC<CafeRestaurantModuleProps> = ({ show
       {/* TAB 1: TABLES & FLOOR PLAN */}
       {activeSubTab === 'tables' && (
         <div className="space-y-6">
-          {/* READY ORDERS ALERT BANNER (Garson için Mutfak Hazır Bildirimleri) */}
-          {kitchenOrders.filter(o => o.status === 'ready').length > 0 && (
-            <div className="bg-gradient-to-r from-emerald-600 via-teal-600 to-emerald-800 text-white p-4 sm:p-5 rounded-3xl shadow-xl border-2 border-emerald-400 flex flex-col md:flex-row items-start md:items-center justify-between gap-4 animate-pulse">
+          {/* READY ORDERS ALERT BANNER (YALNIZCA Garson ve Yönetici için Servis Bildirimi) */}
+          {kitchenOrders.filter(o => o.status === 'ready').length > 0 && (userRole === 'garson' || userRole === 'admin') && (
+            <div className="w-full max-w-full overflow-hidden box-border bg-gradient-to-r from-emerald-600 via-teal-600 to-emerald-800 text-white p-4 sm:p-5 rounded-3xl shadow-xl border-2 border-emerald-400 flex flex-col md:flex-row items-start md:items-center justify-between gap-4 animate-pulse">
               <div className="flex items-center gap-3.5">
                 <div className="w-12 h-12 rounded-2xl bg-white/20 flex items-center justify-center shrink-0">
                   <Bell className="w-6 h-6 text-emerald-200 animate-bounce" />
@@ -1479,15 +1495,15 @@ export const CafeRestaurantModule: React.FC<CafeRestaurantModuleProps> = ({ show
         </div>
       )}
 
-      {/* FLOATING ACTIVE READY ORDER ALERT POPUP (Garson Ekranı Bildirimi) */}
-      {activeReadyAlert && (
-        <div className="fixed top-4 right-4 left-4 sm:left-auto sm:w-[420px] z-[100] bg-gradient-to-r from-emerald-600 via-teal-700 to-emerald-900 text-white rounded-3xl shadow-2xl border-2 border-emerald-400 p-4 sm:p-5 animate-bounce-short">
+      {/* FLOATING ACTIVE READY ORDER ALERT POPUP (YALNIZCA Garson Ekranında Görünür) */}
+      {activeReadyAlert && userRole !== 'mutfak' && activeSubTab !== 'kds' && (userRole === 'garson' || userRole === 'admin') && (
+        <div className="fixed bottom-4 left-3 right-3 sm:left-auto sm:right-6 sm:bottom-6 sm:w-[420px] max-w-[calc(100vw-24px)] z-[100] bg-gradient-to-r from-emerald-700 via-teal-800 to-emerald-950 text-white rounded-3xl shadow-2xl border-2 border-emerald-400/90 p-4 sm:p-5 animate-bounce-short box-border">
           <div className="flex items-start justify-between gap-3">
-            <div className="flex items-center gap-3">
-              <div className="w-12 h-12 rounded-2xl bg-white/20 flex items-center justify-center shrink-0 shadow-inner">
-                <Bell className="w-6 h-6 text-emerald-200 animate-bounce" />
+            <div className="flex items-center gap-3 min-w-0">
+              <div className="w-11 h-11 sm:w-12 sm:h-12 rounded-2xl bg-white/20 flex items-center justify-center shrink-0 shadow-inner">
+                <Bell className="w-5 h-5 sm:w-6 sm:h-6 text-emerald-200 animate-bounce" />
               </div>
-              <div>
+              <div className="min-w-0 flex-1">
                 <div className="flex items-center gap-2">
                   <span className="px-2 py-0.5 rounded-full bg-white/20 text-emerald-100 text-[10px] font-black uppercase tracking-wider">
                     Mutfak Bildirimi
@@ -1496,10 +1512,10 @@ export const CafeRestaurantModule: React.FC<CafeRestaurantModuleProps> = ({ show
                     {activeReadyAlert.time || ''}
                   </span>
                 </div>
-                <h4 className="text-base font-black uppercase text-white mt-0.5 flex items-center gap-1.5">
+                <h4 className="text-sm sm:text-base font-black uppercase text-white mt-0.5 flex items-center gap-1.5 truncate">
                   <span>🔔 {activeReadyAlert.tableName} Hazır!</span>
                 </h4>
-                <p className="text-xs text-emerald-100 font-medium line-clamp-2 mt-0.5">
+                <p className="text-xs text-emerald-100 font-medium line-clamp-1 mt-0.5">
                   {activeReadyAlert.items?.map((it: any) => `${it.qty || 1}x ${it.name}`).join(', ') || 'Sipariş hazırlandı'}
                 </p>
               </div>
@@ -1507,14 +1523,14 @@ export const CafeRestaurantModule: React.FC<CafeRestaurantModuleProps> = ({ show
             <button
               type="button"
               onClick={() => setActiveReadyAlert(null)}
-              className="w-8 h-8 rounded-xl bg-white/10 hover:bg-white/20 flex items-center justify-center text-white cursor-pointer transition-colors"
+              className="w-8 h-8 rounded-xl bg-white/10 hover:bg-white/20 flex items-center justify-center text-white cursor-pointer transition-colors shrink-0"
               title="Kapat"
             >
               <X className="w-4 h-4" />
             </button>
           </div>
 
-          <div className="mt-3.5 pt-3 border-t border-white/20 flex gap-2">
+          <div className="mt-3 pt-3 border-t border-white/20 flex gap-2">
             <button
               type="button"
               onClick={() => {
@@ -1522,8 +1538,8 @@ export const CafeRestaurantModule: React.FC<CafeRestaurantModuleProps> = ({ show
               }}
               className="flex-1 py-2.5 bg-white text-emerald-950 hover:bg-emerald-50 rounded-xl text-xs font-black uppercase shadow-lg flex items-center justify-center gap-1.5 cursor-pointer active:scale-95 transition-all"
             >
-              <Check className="w-4 h-4 text-emerald-700" />
-              <span>Masaya Verildi / Teslim Et</span>
+              <Check className="w-4 h-4 text-emerald-700 stroke-[3]" />
+              <span>Masaya Teslim Et</span>
             </button>
             <button
               type="button"

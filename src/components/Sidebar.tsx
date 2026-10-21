@@ -21,7 +21,8 @@ import {
   Sparkles,
   Palette,
   Scissors,
-  Utensils
+  Utensils,
+  Warehouse
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { cn } from '../lib/utils';
@@ -47,6 +48,7 @@ const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab, pendingOrder
       roles: ['admin', 'staff', 'demo'],
       badge: posCartCount > 0 ? posCartCount : undefined
     },
+    { id: 'warehouse', label: 'Depo Yönetimi', icon: Warehouse, roles: ['admin', 'staff', 'demo'] },
     // Sektörel Modüller (Sadece Süper Admin tarafından açılanlar menüde görünür)
     { id: 'kirtasiye_modulu', label: 'Kırtasiye & Baskı', icon: Printer, roles: ['admin', 'staff', 'demo'] },
     { id: 'bakkal_market_modulu', label: 'Market & Terazi', icon: Scale, roles: ['admin', 'staff', 'demo'] },
@@ -71,6 +73,9 @@ const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab, pendingOrder
 
   const isModuleEnabled = (tabId: string) => {
     if (tabId === 'super_admin' || tabId === 'settings' || tabId === 'printer_settings') return true;
+    if (tabId === 'warehouse') {
+      return currentTenant?.depoYonetimiAktif !== false;
+    }
     if (SECTORAL_MODULES.some(m => m.id === tabId)) {
       return isTenantSectorModuleEnabled(currentTenant, tabId);
     }
@@ -88,6 +93,12 @@ const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab, pendingOrder
     )
   );
 
+  const isWarehouseStaff = Boolean(
+    !isSuperAdmin && role !== 'admin' && (
+      user?.staffType === 'warehouse'
+    )
+  );
+
   const visibleItems = menuItems.filter(item => {
     if (!item.roles.includes(role || '')) return false;
     if (isOrderTaker) {
@@ -95,6 +106,18 @@ const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab, pendingOrder
     }
     if (!isModuleEnabled(item.id)) return false;
     if (role === 'staff' && hasPermission && !isSuperAdmin) {
+      if (item.id === 'barcode') {
+        return Boolean(
+          user?.permissions?.barcode !== false && (
+            user?.permissions?.barcode ||
+            user?.permissions?.warehouse ||
+            user?.permissions?.depoYonetimErisimi ||
+            user?.permissions?.inventory ||
+            user?.permissions?.pos ||
+            user?.staffType === 'warehouse'
+          )
+        );
+      }
       return hasPermission(item.id as any);
     }
     return true;

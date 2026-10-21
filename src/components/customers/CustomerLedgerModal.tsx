@@ -10,6 +10,7 @@ import {
 } from 'firebase/firestore';
 import { db, sepetayTransactionsRef, sepetayCustomersRef } from '../../lib/firebase';
 import { isSepetayTenant, withTenant } from '../../lib/tenant';
+import { getTargetCustomerDocRefs } from '../../lib/customer-sync';
 import { useAuth } from '../../context/AuthContext';
 import { CustomerData } from './CustomerModal';
 import { cn } from '../../lib/utils';
@@ -129,6 +130,17 @@ export const CustomerLedgerModal: React.FC<CustomerLedgerModalProps> = ({
         setLoading(false);
       });
       unsubs.push(unsubSep);
+    } else if (tenantId) {
+      const unsubTenant = onSnapshot(collection(db, 'tenants', tenantId, 'customer_transactions'), (snap) => {
+        snap.docs.forEach(d => {
+          txMap.set(d.id, { id: d.id, ...d.data() });
+        });
+        recomputeTransactions();
+      }, (err) => {
+        console.warn(`tenants/${tenantId}/customer_transactions listener warning:`, err);
+        setLoading(false);
+      });
+      unsubs.push(unsubTenant);
     }
 
     // 2. Real-time listener on root customer_transactions without where filter
@@ -208,20 +220,24 @@ export const CustomerLedgerModal: React.FC<CustomerLedgerModalProps> = ({
       }, tenantId);
 
       const newTxRef = await addDoc(collection(db, 'customer_transactions'), txPayload);
-      await setDoc(doc(db, 'customers', customer.id!), {
-        debt: increment(amountNum),
-        updatedAt: serverTimestamp(),
-      }, { merge: true });
+      
+      const targetCustRefs = getTargetCustomerDocRefs(
+        db,
+        customer.id!,
+        tenantId,
+        (customer as any).tenantId || (customer as any).tenant_id
+      );
+      await Promise.allSettled(
+        targetCustRefs.map(r => setDoc(r, {
+          debt: increment(amountNum),
+          updatedAt: serverTimestamp()
+        }, { merge: true }))
+      );
 
       if (isSepetayTenant(tenantId)) {
-        await setDoc(doc(sepetayTransactionsRef, newTxRef.id), txPayload, { merge: true });
-        await setDoc(doc(sepetayCustomersRef, customer.id!), {
-          name: customer.name,
-          debt: increment(amountNum),
-          tenantId: 'sepetay',
-          tenant_id: 'sepetay',
-          updatedAt: serverTimestamp(),
-        }, { merge: true });
+        await setDoc(doc(sepetayTransactionsRef, newTxRef.id), txPayload, { merge: true }).catch(() => {});
+      } else if (tenantId) {
+        await setDoc(doc(db, 'tenants', tenantId, 'customer_transactions', newTxRef.id), txPayload, { merge: true }).catch(() => {});
       }
 
       setManualDebtAmount('');

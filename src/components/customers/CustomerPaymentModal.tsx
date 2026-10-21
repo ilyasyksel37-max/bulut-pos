@@ -6,6 +6,7 @@ import { CustomerData } from './CustomerModal';
 import { recordCashMovement } from '../../lib/kasa-utils';
 import { useAuth } from '../../context/AuthContext';
 import { isSepetayTenant, withTenant } from '../../lib/tenant';
+import { getTargetCustomerDocRefs } from '../../lib/customer-sync';
 
 interface CustomerPaymentModalProps {
   isOpen: boolean;
@@ -58,21 +59,24 @@ export const CustomerPaymentModal: React.FC<CustomerPaymentModalProps> = ({
       // 1. Record customer transaction
       const txDoc = await addDoc(collection(db, 'customer_transactions'), txPayload);
 
-      // 2. Decrement customer debt
-      await setDoc(doc(db, 'customers', customer.id!), {
-        debt: increment(-paymentNum),
-        updatedAt: serverTimestamp(),
-      }, { merge: true });
+      // 2. Decrement customer debt across all collections
+      const targetCustRefs = getTargetCustomerDocRefs(
+        db,
+        customer.id!,
+        tenantId,
+        (customer as any).tenantId || (customer as any).tenant_id
+      );
+      await Promise.allSettled(
+        targetCustRefs.map(r => setDoc(r, {
+          debt: increment(-paymentNum),
+          updatedAt: serverTimestamp()
+        }, { merge: true }))
+      );
 
       if (isSep) {
-        await setDoc(doc(sepetayTransactionsRef, txDoc.id), txPayload, { merge: true });
-        await setDoc(doc(sepetayCustomersRef, customer.id!), {
-          name: customer.name,
-          debt: increment(-paymentNum),
-          tenantId: 'sepetay',
-          tenant_id: 'sepetay',
-          updatedAt: serverTimestamp(),
-        }, { merge: true });
+        await setDoc(doc(sepetayTransactionsRef, txDoc.id), txPayload, { merge: true }).catch(() => {});
+      } else if (tenantId) {
+        await setDoc(doc(db, 'tenants', tenantId, 'customer_transactions', txDoc.id), txPayload, { merge: true }).catch(() => {});
       }
 
       // 3. Record in Cash Register / Portfolio if Nakit, Çek, or Senet

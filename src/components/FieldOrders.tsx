@@ -26,7 +26,8 @@ import {
   Layers,
   Sparkles,
   Phone,
-  MapPin
+  MapPin,
+  Warehouse
 } from 'lucide-react';
 import { 
   collection, 
@@ -40,11 +41,12 @@ import {
   getDocs, 
   where, 
   increment, 
-  orderBy 
+  orderBy,
+  setDoc
 } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { useAuth } from '../context/AuthContext';
-import { isDocInTenant, isTenantPersonnel, withTenant } from '../lib/tenant';
+import { isDocInTenant, isTenantPersonnel, withTenant, isSepetayTenant } from '../lib/tenant';
 import { recordCashMovement, CurrencyType } from '../lib/kasa-utils';
 import { CustomerData } from './customers/CustomerModal';
 import { format } from 'date-fns';
@@ -62,6 +64,8 @@ export interface FieldOrderItem {
 export interface FieldOrder {
   id: string;
   orderNumber: string;
+  targetLocation?: 'magaza' | 'depo';
+  targetLocationName?: string;
   customerId: string;
   customerName: string;
   customerPhone?: string;
@@ -104,6 +108,7 @@ export const FieldOrders: React.FC<FieldOrdersProps> = ({
 
   // New Order Modal states
   const [isNewOrderModalOpen, setIsNewOrderModalOpen] = useState(false);
+  const [orderTargetLocation, setOrderTargetLocation] = useState<'magaza' | 'depo'>('magaza');
   const [orderCustomer, setOrderCustomer] = useState<CustomerData | null>(null);
   const [customerSearchQuery, setCustomerSearchQuery] = useState('');
   const [customerSuggestions, setCustomerSuggestions] = useState<CustomerData[]>([]);
@@ -245,11 +250,33 @@ export const FieldOrders: React.FC<FieldOrdersProps> = ({
     setIsProcessingFulfillment(true);
     try {
       // 1. Decrement Stock for all modified items in fulfillment
+      const isDepoTarget = fulfillmentOrder.targetLocation === 'depo';
       for (const item of fulfillmentItems) {
-        await updateDoc(doc(db, 'products', item.id), {
-          stock: increment(-item.quantity),
-          updatedAt: serverTimestamp()
-        });
+        if (isDepoTarget) {
+          const depoPayload = {
+            depoStok: increment(-item.quantity),
+            depoStoku: increment(-item.quantity),
+            stokDepo: increment(-item.quantity),
+            warehouseStock: increment(-item.quantity),
+            updatedAt: serverTimestamp()
+          };
+          await updateDoc(doc(db, 'products', item.id), depoPayload).catch(() => {});
+          if (isSepetayTenant(tenantId)) {
+            await setDoc(doc(db, 'tenants', 'sepetay', 'products', item.id), depoPayload, { merge: true }).catch(() => {});
+          }
+        } else {
+          const storePayload = {
+            stock: increment(-item.quantity),
+            stok: increment(-item.quantity),
+            magazaStok: increment(-item.quantity),
+            magazaStoku: increment(-item.quantity),
+            updatedAt: serverTimestamp()
+          };
+          await updateDoc(doc(db, 'products', item.id), storePayload).catch(() => {});
+          if (isSepetayTenant(tenantId)) {
+            await setDoc(doc(db, 'tenants', 'sepetay', 'products', item.id), storePayload, { merge: true }).catch(() => {});
+          }
+        }
       }
 
       // 2. Create Sale Record in sales collection
@@ -552,6 +579,8 @@ export const FieldOrders: React.FC<FieldOrdersProps> = ({
 
       const rawOrderData = {
         orderNumber,
+        targetLocation: orderTargetLocation,
+        targetLocationName: orderTargetLocation === 'depo' ? 'Merkez Depo' : 'Mağaza Şubesi',
         customerId: orderCustomer.id,
         customerName: orderCustomer.name,
         customerPhone: orderCustomer.phone || null,
@@ -569,7 +598,7 @@ export const FieldOrders: React.FC<FieldOrdersProps> = ({
         foreignAmount: orderCurrency !== 'TRY' ? foreignTotal : null,
         paymentMethod: orderPaymentMethod,
         notes: orderNotes.trim() || null,
-        status: 'BEKLIYOR', // Merkez şube hazırlığı bekliyor!
+        status: 'BEKLIYOR', // Merkez şube / depo hazırlığı bekliyor!
         createdAt: serverTimestamp()
       };
 
@@ -577,12 +606,16 @@ export const FieldOrders: React.FC<FieldOrdersProps> = ({
 
       await addDoc(collection(db, 'field_orders'), orderData);
 
-      alert(`✅ Sipariş (#${orderNumber}) merkez şubeye iletildi! Merkez şube ürünü hazırlayınca stoktan düşecek ve müşterinin carisine işlenecektir.`);
+      alert(orderTargetLocation === 'depo'
+        ? `✅ Mal talebi / sipariş (#${orderNumber}) doğrudan MERKEZ DEPOYA iletildi! Depo sorumlusu hazırladığında depo stokundan düşülecektir.`
+        : `✅ Sipariş (#${orderNumber}) MAĞAZA MERKEZİNE iletildi! Mağaza ürünü hazırlayınca stoktan düşecek ve müşterinin carisine işlenecektir.`
+      );
       
       // Reset form
       setOrderCart([]);
       setOrderCustomer(null);
       setOrderNotes('');
+      setOrderTargetLocation('magaza');
       setIsNewOrderModalOpen(false);
     } catch (err) {
       console.error(err);
@@ -608,11 +641,33 @@ export const FieldOrders: React.FC<FieldOrdersProps> = ({
     setIsProcessingFulfillment(true);
     try {
       // 1. Decrement Stock for all items in order
+      const isDepoTarget = order.targetLocation === 'depo';
       for (const item of order.items) {
-        await updateDoc(doc(db, 'products', item.id), {
-          stock: increment(-item.quantity),
-          updatedAt: serverTimestamp()
-        });
+        if (isDepoTarget) {
+          const depoPayload = {
+            depoStok: increment(-item.quantity),
+            depoStoku: increment(-item.quantity),
+            stokDepo: increment(-item.quantity),
+            warehouseStock: increment(-item.quantity),
+            updatedAt: serverTimestamp()
+          };
+          await updateDoc(doc(db, 'products', item.id), depoPayload).catch(() => {});
+          if (isSepetayTenant(tenantId)) {
+            await setDoc(doc(db, 'tenants', 'sepetay', 'products', item.id), depoPayload, { merge: true }).catch(() => {});
+          }
+        } else {
+          const storePayload = {
+            stock: increment(-item.quantity),
+            stok: increment(-item.quantity),
+            magazaStok: increment(-item.quantity),
+            magazaStoku: increment(-item.quantity),
+            updatedAt: serverTimestamp()
+          };
+          await updateDoc(doc(db, 'products', item.id), storePayload).catch(() => {});
+          if (isSepetayTenant(tenantId)) {
+            await setDoc(doc(db, 'tenants', 'sepetay', 'products', item.id), storePayload, { merge: true }).catch(() => {});
+          }
+        }
       }
 
       // 2. Create Sale Record in `sales` collection for accounting & staff turnover
@@ -1068,17 +1123,24 @@ export const FieldOrders: React.FC<FieldOrdersProps> = ({
                     </p>
                   </div>
 
-                  {/* Status Badge */}
-                  <span className={`px-2.5 py-1 rounded-full text-[10px] font-black uppercase tracking-tight ${
-                    isPending ? 'bg-amber-100 text-amber-800 border border-amber-200 animate-pulse' :
-                    isPreparing ? 'bg-blue-100 text-blue-800 border border-blue-200' :
-                    isCompleted ? 'bg-emerald-100 text-emerald-800 border border-emerald-200' :
-                    'bg-rose-100 text-rose-800 border border-rose-200'
-                  }`}>
-                    {isPending ? 'Merkez Bekliyor' :
-                     isPreparing ? 'Hazırlanıyor' :
-                     isCompleted ? 'Hazırlandı & İşlendi' : 'İptal'}
-                  </span>
+                  <div className="flex flex-col items-end gap-1">
+                    {/* Status Badge */}
+                    <span className={`px-2.5 py-1 rounded-full text-[10px] font-black uppercase tracking-tight ${
+                      isPending ? 'bg-amber-100 text-amber-800 border border-amber-200 animate-pulse' :
+                      isPreparing ? 'bg-blue-100 text-blue-800 border border-blue-200' :
+                      isCompleted ? 'bg-emerald-100 text-emerald-800 border border-emerald-200' :
+                      'bg-rose-100 text-rose-800 border border-rose-200'
+                    }`}>
+                      {isPending ? (ord.targetLocation === 'depo' ? 'Depo Onayı Bekliyor' : 'Mağaza Bekliyor') :
+                       isPreparing ? 'Hazırlanıyor' :
+                       isCompleted ? 'Hazırlandı & Sevk Edildi' : 'İptal'}
+                    </span>
+                    <span className={`px-2 py-0.5 rounded-md text-[9px] font-black uppercase tracking-wider ${
+                      ord.targetLocation === 'depo' ? 'bg-amber-50 text-amber-800 border border-amber-200' : 'bg-blue-50 text-blue-800 border border-blue-200'
+                    }`}>
+                      {ord.targetLocation === 'depo' ? '📦 Hedef: Depo' : '🏬 Hedef: Mağaza'}
+                    </span>
+                  </div>
                 </div>
 
                 {/* Customer & Staff Info */}
@@ -1268,6 +1330,45 @@ export const FieldOrders: React.FC<FieldOrdersProps> = ({
                     </option>
                   )}
                 </select>
+              </div>
+
+              {/* HEDEF LOKASYON: MAĞAZA VEYA DEPO */}
+              <div className="bg-slate-50 p-3.5 rounded-2xl border border-slate-200/80">
+                <label className="text-xs font-black uppercase text-slate-700 tracking-wider flex items-center gap-1.5 mb-2">
+                  <Warehouse className="w-3.5 h-3.5 text-indigo-600" />
+                  Sipariş / Mal Talebi Teslim Noktası (Hedef Lokasyon) *
+                </label>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setOrderTargetLocation('magaza')}
+                    className={`p-2.5 rounded-xl border text-xs font-black flex items-center justify-center gap-2 transition-all cursor-pointer ${
+                      orderTargetLocation === 'magaza'
+                        ? 'bg-blue-600 text-white border-blue-600 shadow-sm'
+                        : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-100'
+                    }`}
+                  >
+                    <Store className="w-4 h-4" />
+                    <span>🏬 Mağaza Şubesi</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setOrderTargetLocation('depo')}
+                    className={`p-2.5 rounded-xl border text-xs font-black flex items-center justify-center gap-2 transition-all cursor-pointer ${
+                      orderTargetLocation === 'depo'
+                        ? 'bg-amber-600 text-white border-amber-600 shadow-sm'
+                        : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-100'
+                    }`}
+                  >
+                    <Warehouse className="w-4 h-4" />
+                    <span>📦 Merkez Depo (Mal Talebi)</span>
+                  </button>
+                </div>
+                <p className="text-[10px] text-slate-500 mt-1.5 font-medium">
+                  {orderTargetLocation === 'depo'
+                    ? '💡 Bu sipariş doğrudan Depo Yönetimi modülündeki "Saha Siparişleri" ekranına düşecek ve depo stokundan sevk edilecektir.'
+                    : '💡 Bu sipariş merkez mağaza hazırlığına iletilecek ve mağaza stokundan düşülecektir.'}
+                </p>
               </div>
 
               {/* 1. MÜŞTERİ CARİSİ SEÇİMİ */}
@@ -1672,10 +1773,20 @@ export const FieldOrders: React.FC<FieldOrdersProps> = ({
                   <button
                     type="submit"
                     disabled={isSubmitting || orderCart.length === 0}
-                    className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-black shadow-lg transition-all active:scale-95 disabled:opacity-50 flex items-center gap-2"
+                    className={`px-5 py-2.5 text-white rounded-xl text-xs font-black shadow-lg transition-all active:scale-95 disabled:opacity-50 flex items-center gap-2 ${
+                      orderTargetLocation === 'depo'
+                        ? 'bg-amber-600 hover:bg-amber-700'
+                        : 'bg-indigo-600 hover:bg-indigo-700'
+                    }`}
                   >
                     <Send className="w-3.5 h-3.5" />
-                    <span>{isSubmitting ? 'İletiliyor...' : 'Merkez Şubeye Gönder'}</span>
+                    <span>
+                      {isSubmitting
+                        ? 'İletiliyor...'
+                        : orderTargetLocation === 'depo'
+                        ? 'Depoya Gönder'
+                        : 'Mağazaya Gönder'}
+                    </span>
                   </button>
                 </div>
               </div>

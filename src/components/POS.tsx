@@ -25,6 +25,7 @@ import { lookupGlobalProduct, saveToGlobalCatalog, GlobalProduct } from '../lib/
 import { GlobalProductQuickRegisterModal, QuickRegisteredProductData } from './common/GlobalProductQuickRegisterModal';
 import { PrintSelectionModal, PrintFormat } from './common/PrintSelectionModal';
 import { loadPrinterSettings, buildReceiptPrintHtml, printHtmlDocument } from '../lib/printer-settings';
+import { recordCustomerSaleAndLedger, getTargetCustomerDocRefs } from '../lib/customer-sync';
 
 export interface CartItem {
   id: string;
@@ -419,6 +420,16 @@ const POS: React.FC<POSProps> = ({
         console.warn("tenants/sepetay/customers dinleme uyarısı:", err);
       });
       unsubs.push(unsubSepSub);
+    } else if (tenantId) {
+      const unsubTenantSub = onSnapshot(collection(db, 'tenants', tenantId, 'customers'), (snap) => {
+        snap.docs.forEach(d => {
+          map.set(d.id, { id: d.id, tenantId, ...(d.data() as any) } as CustomerData);
+        });
+        updateList();
+      }, (err) => {
+        console.warn(`tenants/${tenantId}/customers dinleme uyarısı:`, err);
+      });
+      unsubs.push(unsubTenantSub);
     }
 
     ['customers', 'musteriler', 'cariler'].forEach(colName => {
@@ -1133,12 +1144,20 @@ const POS: React.FC<POSProps> = ({
         const currentCustDebt = Number(returnCustomer.debt || 0);
         const newCustDebt = Math.max(0, Number((currentCustDebt - returnTotal).toFixed(2)));
 
-        await updateDoc(doc(db, 'customers', returnCustomer.id), {
-          debt: increment(-returnTotal),
-          updatedAt: serverTimestamp()
-        });
+        const targetCustRefs = getTargetCustomerDocRefs(
+          db, 
+          returnCustomer.id, 
+          tenantId, 
+          (returnCustomer as any).tenantId || (returnCustomer as any).tenant_id
+        );
+        await Promise.allSettled(
+          targetCustRefs.map(r => setDoc(r, {
+            debt: increment(-returnTotal),
+            updatedAt: serverTimestamp()
+          }, { merge: true }))
+        );
 
-        await addDoc(collection(db, 'customer_transactions'), withTenant({
+        const returnTxPayload = withTenant({
           customerId: returnCustomer.id,
           customerName: returnCustomer.name,
           type: 'PAYMENT',
@@ -1148,7 +1167,14 @@ const POS: React.FC<POSProps> = ({
           balanceAfter: newCustDebt,
           paymentMethod: 'Ürün İadesi',
           date: serverTimestamp()
-        }));
+        });
+
+        const retTxDoc = await addDoc(collection(db, 'customer_transactions'), returnTxPayload);
+        if (isSepetayTenant(tenantId)) {
+          await setDoc(doc(sepetayTransactionsRef, retTxDoc.id), returnTxPayload, { merge: true }).catch(() => {});
+        } else if (tenantId) {
+          await setDoc(doc(db, 'tenants', tenantId, 'customer_transactions', retTxDoc.id), returnTxPayload, { merge: true }).catch(() => {});
+        }
 
         await addDoc(collection(db, 'sales'), withTenant({
           items: [{
@@ -1261,7 +1287,7 @@ const POS: React.FC<POSProps> = ({
     setIsProcessing(true);
 
     try {
-      const isCustomerSale = saleMode === 'customer' && !!customer;
+      const isCustomerSale = !!(customer && customer.id);
       const currentDebt = Number(customer?.debt || 0);
       const newDebt = Number((currentDebt + grandTotal).toFixed(2));
 
@@ -1304,51 +1330,44 @@ const POS: React.FC<POSProps> = ({
 
       const saleRef = await addDoc(collection(db, 'sales'), withTenant(saleData));
 
-      // If sale is added/completed on a mobile screen and tenant has mobile_pos_sync enabled, notify all PC Desktop users
-      if (isMobilePosSyncEnabled && typeof window !== 'undefined' && window.innerWidth < 1024) {
-        try {
-          await addDoc(collection(db, 'mobile_pos_orders'), withTenant({
-            cart: cart.map(item => ({
-              id: item.id,
-              name: item.name,
-              price: item.price,
-              purchasePrice: item.purchasePrice || 0,
-              quantity: item.quantity,
-              stock: item.stock,
-              barcode: item.barcode || '',
-              discount: item.discount || 0
-            })),
-            customer: isCustomerSale && customer ? { ...customer } : null,
-            saleMode,
-            paymentMethod,
-            subtotal,
-            taxRate,
-            taxAmount,
-            discount: totalDiscount,
-            total: grandTotal,
-            sellerCode: selectedSeller.code,
-            sellerName: selectedSeller.name || user?.displayName || 'Mobil Kullanıcı',
-            sellerId: selectedSeller.id,
-            senderUid: user?.uid || 'guest',
-            saleId: saleRef.id,
-            orderType: 'COMPLETED_SALE',
-            status: 'PENDING',
-            createdAt: serverTimestamp(),
-            timestampMs: Date.now()
-          }));
-        } catch (mobSyncErr) {
-          console.warn('Mobile to PC sale notification warning:', mobSyncErr);
-        }
+      if (isSepetayTenant(tenantId)) {
+        await setDoc(doc(sepetaySalesRef, saleRef.id), withTenant(saleData), { merge: true }).catch(() => {});
+      } else if (tenantId) {
+        await setDoc(doc(db, 'tenants', tenantId, 'sales', saleRef.id), withTenant(saleData), { merge: true }).catch(() => {});
       }
 
       // Decrement stock for items safely (skip custom/muhtelif products)
+      const isWarehouseUser = user?.staffType === 'warehouse';
       for (const item of cart) {
         if (item.id.startsWith('muhtelif-') || item.barcode === 'MUHTELIF') continue;
         try {
-          await updateDoc(doc(db, 'products', item.id), {
-            stock: increment(-item.quantity),
-            updatedAt: serverTimestamp()
-          });
+          if (isWarehouseUser) {
+            // Depo personelinin gerçekleştirdiği satışlar doğrudan depo stokundan düşülür
+            const warehousePayload = {
+              depoStok: increment(-item.quantity),
+              depoStoku: increment(-item.quantity),
+              stokDepo: increment(-item.quantity),
+              warehouseStock: increment(-item.quantity),
+              updatedAt: serverTimestamp()
+            };
+            await updateDoc(doc(db, 'products', item.id), warehousePayload).catch(() => {});
+            if (isSepetayTenant(tenantId)) {
+              await setDoc(doc(db, 'tenants', 'sepetay', 'products', item.id), warehousePayload, { merge: true }).catch(() => {});
+            }
+          } else {
+            // Standart Mağaza perakende satışı mağaza stokundan düşülür
+            const storePayload = {
+              stock: increment(-item.quantity),
+              stok: increment(-item.quantity),
+              magazaStok: increment(-item.quantity),
+              magazaStoku: increment(-item.quantity),
+              updatedAt: serverTimestamp()
+            };
+            await updateDoc(doc(db, 'products', item.id), storePayload).catch(() => {});
+            if (isSepetayTenant(tenantId)) {
+              await setDoc(doc(db, 'tenants', 'sepetay', 'products', item.id), storePayload, { merge: true }).catch(() => {});
+            }
+          }
         } catch (stockErr) {
           console.warn(`Stok düşümü atlandı (${item.name}):`, stockErr);
         }
@@ -1397,44 +1416,30 @@ const POS: React.FC<POSProps> = ({
       if (isCustomerSale && customer?.id) {
         try {
           const itemsSummary = cart.map(i => `${i.quantity}x ${i.name}`).join(', ');
-          const isDebtType = paymentMethod === 'veresiye' || paymentMethod === 'cek' || paymentMethod === 'senet';
-          
-          const methodLabel = paymentMethod === 'veresiye' ? 'Cari (Veresiye)' : paymentMethod === 'cek' ? 'Çek' : paymentMethod === 'senet' ? 'Senet' : paymentMethod === 'cash' ? 'Nakit' : 'Kredi Kartı';
-          
-          // Update customer document
-          const customerUpdates: any = {
-            loyaltyPoints: increment(Math.floor(grandTotal / 10)),
-            totalSpent: increment(grandTotal),
-            updatedAt: serverTimestamp()
-          };
-          if (isDebtType) {
-            customerUpdates.debt = increment(grandTotal);
-          }
-          await updateDoc(doc(db, 'customers', customer.id), customerUpdates);
+          const splitCash = paymentMethod === 'parcali' ? (parseFloat(splitCashAmount.replace(',', '.')) || 0) : 0;
+          const splitCard = paymentMethod === 'parcali' ? (parseFloat(splitCardAmount.replace(',', '.')) || 0) : 0;
 
-          // Record in ledger
-          await addDoc(collection(db, 'customer_transactions'), withTenant({
-            customerId: customer.id,
-            customerName: customer.name,
+          const { newDebt: updatedCustDebt, isDebtType, methodLabel } = await recordCustomerSaleAndLedger({
+            db,
+            tenantId,
+            customer,
             saleId: saleRef.id,
-            type: isDebtType ? 'DEBT' : 'PURCHASE',
-            title: `${methodLabel} Satış (${itemsSummary.length > 70 ? itemsSummary.substring(0, 70) + '...' : itemsSummary})`,
-            amount: grandTotal,
-            previousBalance: currentDebt,
-            paymentMethod: methodLabel,
-            balanceAfter: isDebtType ? newDebt : currentDebt, 
-            currency: selectedCurrency,
-            exchangeRate: activeRate || 1,
-            foreignAmount: selectedCurrency !== 'TRY' ? foreignTotal : null,
+            paymentMethod,
+            grandTotal,
+            itemsSummary,
+            splitCashAmount: splitCash,
+            splitCardAmount: splitCard,
+            selectedCurrency,
+            activeRate,
+            foreignTotal,
             sellerCode: selectedSeller.code || 'E01',
-            sellerName: selectedSeller.name || 'Kasiyer',
-            date: serverTimestamp()
-          }));
+            sellerName: selectedSeller.name || 'Kasiyer'
+          });
 
           // Immediately update local customer state
           setCustomer(prev => prev ? {
             ...prev,
-            debt: isDebtType ? newDebt : Number(prev.debt || 0),
+            debt: isDebtType ? updatedCustDebt : Number(prev.debt || 0),
             loyaltyPoints: (prev.loyaltyPoints || 0) + Math.floor(grandTotal / 10),
             totalSpent: (prev.totalSpent || 0) + grandTotal
           } : null);
@@ -1442,7 +1447,7 @@ const POS: React.FC<POSProps> = ({
           if (isDebtType) {
             showToast(`🎉 ${methodLabel} satış tamamlandı! (${customer.name} carisine ${grandTotal.toLocaleString('tr-TR', { minimumFractionDigits: 2 })} ₺ işlendi)`);
           } else {
-            showToast(`🎉 Satış tamamlandı (${paymentMethod === 'cash' ? 'Nakit' : 'Kredi Kartı'})! Puan yüklendi.`);
+            showToast(`🎉 ${methodLabel} satış tamamlandı! (${customer.name} carisine işlendi, sadakat puanı yüklendi)`);
           }
         } catch (custErr) {
           console.error("Müşteri cari ekstresi kaydı hatası:", custErr);
@@ -2833,7 +2838,7 @@ const POS: React.FC<POSProps> = ({
               >
                 <Smartphone className="w-4 h-4 text-indigo-200" />
                 <Monitor className="w-4 h-4 text-white" />
-                <span>{isSendingToDesktop ? 'GÖNDERİLİYOR...' : 'PC MASAÜSTÜNE GÖNDER (TÜM KULLANICILAR)'}</span>
+                <span>{isSendingToDesktop ? 'GÖNDERİLİYOR...' : 'PC MASAÜSTÜNE GÖNDER'}</span>
                 <Send className="w-3.5 h-3.5 text-indigo-200" />
               </button>
             )}

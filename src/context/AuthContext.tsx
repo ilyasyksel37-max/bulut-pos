@@ -30,6 +30,12 @@ export interface PersonnelPermissions {
   personnel: boolean;      // Personel & Yetki Yönetimi
   expenses: boolean;       // Giderler
   settings: boolean;       // Ayarlar
+  warehouse?: boolean;     // Depo Yönetimi Modülü
+  barcode?: boolean;       // Barkod Oluştur & Etiket Basımı
+  depoYonetimErisimi?: boolean; // Depo Yönetim Erişimi
+  depoSatisYetkisi?: boolean;   // Depo stoku üzerinden satış yetkisi
+  depoTransferYetkisi?: boolean; // Mağaza/Depo transfer yetkisi
+  sahaSiparisYetkisi?: boolean;  // Saha elemanı sipariş yetkisi
   canDiscount?: boolean;   // İskonto Yetkisi
   canFulfillOrders?: boolean; // Merkez Sipariş Onaylama / Hazırlama
   canEditPrice?: boolean;  // Fiyat Değiştirme
@@ -50,6 +56,12 @@ export const DEFAULT_ADMIN_PERMISSIONS: PersonnelPermissions = {
   personnel: true,
   expenses: true,
   settings: true,
+  warehouse: true,
+  barcode: true,
+  depoYonetimErisimi: true,
+  depoSatisYetkisi: true,
+  depoTransferYetkisi: true,
+  sahaSiparisYetkisi: true,
   canDiscount: true,
   canFulfillOrders: true,
   canEditPrice: true,
@@ -70,6 +82,35 @@ export const STORE_STAFF_PERMISSIONS: PersonnelPermissions = {
   personnel: false,
   expenses: true,
   settings: false,
+  warehouse: false,
+  barcode: true,
+  depoYonetimErisimi: false,
+  depoSatisYetkisi: false,
+  depoTransferYetkisi: false,
+  sahaSiparisYetkisi: false,
+  canDiscount: false,
+  canFulfillOrders: true,
+  canEditPrice: false,
+};
+
+// 📦 Depo Görevlisi (Depo İzolasyonu: Mağaza kasası ve satışlarından izole, stok yönetimi & mağaza/depo stokları görünür)
+export const WAREHOUSE_STAFF_PERMISSIONS: PersonnelPermissions = {
+  pos: false,
+  kasa: false,
+  field_orders: false,
+  inventory: true, // Depo personelinin mağaza ve depo stoklarını görebilmesi
+  customers: false,
+  suppliers: false,
+  dashboard: false,
+  personnel: false,
+  expenses: false,
+  settings: false,
+  warehouse: true,
+  barcode: true,
+  depoYonetimErisimi: true,
+  depoSatisYetkisi: true,
+  depoTransferYetkisi: true,
+  sahaSiparisYetkisi: false,
   canDiscount: false,
   canFulfillOrders: true,
   canEditPrice: false,
@@ -87,6 +128,12 @@ export const FIELD_STAFF_PERMISSIONS: PersonnelPermissions = {
   personnel: false,
   expenses: false,
   settings: false,
+  warehouse: false,
+  barcode: true,
+  depoYonetimErisimi: false,
+  depoSatisYetkisi: false,
+  depoTransferYetkisi: false,
+  sahaSiparisYetkisi: true,
   canDiscount: true,
   canFulfillOrders: false,
   canEditPrice: false,
@@ -183,6 +230,77 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       // Keep active while app is running
     };
   }, [tenantId]);
+
+  // Real-time live listener for current user document in Firestore to sync permissions & roles
+  useEffect(() => {
+    const currentUid = user?.id || user?.uid;
+    const currentUsername = user?.username;
+    if ((!currentUid && !currentUsername) || role === 'demo') return;
+
+    if (currentUid) {
+      const unsub = onSnapshot(doc(db, 'users', currentUid), (docSnap) => {
+        if (docSnap.exists()) {
+          const freshData = docSnap.data();
+          setUser((prevUser: any) => {
+            if (!prevUser) return prevUser;
+            const merged = {
+              ...prevUser,
+              ...freshData,
+              permissions: freshData.permissions || prevUser.permissions,
+              staffType: freshData.staffType ?? prevUser.staffType,
+              cafeRole: freshData.cafeRole ?? prevUser.cafeRole,
+            };
+            try {
+              const saved = localStorage.getItem('sep_session');
+              if (saved) {
+                const parsed = JSON.parse(saved);
+                localStorage.setItem('sep_session', JSON.stringify({
+                  ...parsed,
+                  user: merged,
+                }));
+              }
+            } catch (e) {}
+            return merged;
+          });
+        }
+      }, (err) => {
+        console.warn("User live permission listener error:", err);
+      });
+      return () => unsub();
+    } else if (currentUsername) {
+      const q = query(collection(db, 'users'), where('username', '==', currentUsername.toLowerCase().trim()));
+      const unsub = onSnapshot(q, (snap) => {
+        if (!snap.empty) {
+          const docSnap = snap.docs[0];
+          const freshData = docSnap.data();
+          setUser((prevUser: any) => {
+            if (!prevUser) return prevUser;
+            const merged = {
+              ...prevUser,
+              id: docSnap.id,
+              uid: docSnap.id,
+              ...freshData,
+              permissions: freshData.permissions || prevUser.permissions,
+              staffType: freshData.staffType ?? prevUser.staffType,
+              cafeRole: freshData.cafeRole ?? prevUser.cafeRole,
+            };
+            try {
+              const saved = localStorage.getItem('sep_session');
+              if (saved) {
+                const parsed = JSON.parse(saved);
+                localStorage.setItem('sep_session', JSON.stringify({
+                  ...parsed,
+                  user: merged,
+                }));
+              }
+            } catch (e) {}
+            return merged;
+          });
+        }
+      });
+      return () => unsub();
+    }
+  }, [user?.id, user?.uid, user?.username, role]);
 
   const switchTenant = (newTenantId: string) => {
     if (!isSuperAdmin) {
@@ -306,6 +424,21 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       return true;
     }
     if (role === 'staff') {
+      if (permission === 'barcode') {
+        return Boolean(
+          user?.permissions?.barcode !== false && (
+            user?.permissions?.barcode ||
+            user?.permissions?.warehouse ||
+            user?.permissions?.depoYonetimErisimi ||
+            user?.permissions?.inventory ||
+            user?.permissions?.pos ||
+            user?.staffType === 'warehouse'
+          )
+        );
+      }
+      if (permission === 'warehouse') {
+        return Boolean(user?.permissions?.warehouse || user?.permissions?.depoYonetimErisimi || user?.staffType === 'warehouse');
+      }
       if (permission === 'kafe_restoran_modulu') {
         return Boolean(user?.permissions?.canAccessCafe || user?.permissions?.isGarson || user?.permissions?.isMutfak || user?.cafeRole === 'garson' || user?.cafeRole === 'mutfak' || user?.staffType === 'garson' || user?.staffType === 'mutfak');
       }
@@ -327,6 +460,29 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         setRole(sessionData.role);
         setLoading(false);
         if (sessionData.role === 'demo' || sessionData.role === 'staff') {
+          if (sessionData.role === 'staff') {
+            const uid = sessionData.user?.id || sessionData.user?.uid;
+            if (uid) {
+              getDoc(doc(db, 'users', uid)).then(docSnap => {
+                if (docSnap.exists()) {
+                  const freshData = docSnap.data();
+                  setUser((prev: any) => {
+                    const merged = {
+                      ...(prev || sessionData.user),
+                      ...freshData,
+                      permissions: freshData.permissions || (prev?.permissions || sessionData.user?.permissions),
+                      staffType: freshData.staffType ?? (prev?.staffType || sessionData.user?.staffType),
+                      cafeRole: freshData.cafeRole ?? (prev?.cafeRole || sessionData.user?.cafeRole),
+                    };
+                    try {
+                      localStorage.setItem('sep_session', JSON.stringify({ ...sessionData, user: merged }));
+                    } catch (e) {}
+                    return merged;
+                  });
+                }
+              }).catch(console.warn);
+            }
+          }
           return;
         }
         setSubscriptionStatus(sessionData.subscriptionStatus || 'inactive');
